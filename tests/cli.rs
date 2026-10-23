@@ -144,6 +144,39 @@ impl Drop for Server {
     }
 }
 impl Server {
+    async fn raw_http(response: Vec<u8>) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Requests::default();
+        let captured = requests.clone();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut head = Vec::new();
+            while !head.ends_with(b"\r\n\r\n") {
+                let mut byte = [0];
+                stream.read_exact(&mut byte).await.unwrap();
+                head.push(byte[0]);
+                assert!(head.len() <= 65536);
+            }
+            let head = String::from_utf8(head).unwrap();
+            let mut first = head.lines().next().unwrap().split_whitespace();
+            captured.lock().unwrap().push(Request {
+                method: first.next().unwrap().to_owned(),
+                path: first.next().unwrap().to_owned(),
+                headers: BTreeMap::new(),
+                body: Value::Null,
+            });
+            // Clients can reject a response before consuming its body.
+            let _ = stream.write_all(&response).await;
+            let _ = stream.shutdown().await;
+        });
+        Self {
+            url,
+            requests,
+            task,
+        }
+    }
+
     async fn http(replies: Vec<Reply>) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
@@ -286,6 +319,83 @@ async fn agent_namespace_and_legacy_commands_preserve_requests() {
     assert_eq!(requests[2].path, "/agents/analyst/versions/7");
     assert!(!requests[0].headers.contains_key("authorization"));
     assert_eq!(requests.len(), 4);
+}
+
+#[tokio::test]
+async fn agent_api_failures_do_not_pollute_stdout() {
+    for binary in [HUDSON, AGENT] {
+        let server = Server::http(vec![Reply {
+            status: "401 Unauthorized",
+            body: json!({"error":"fixture-private-token"}),
+            headers: "",
+        }])
+        .await;
+        let mut args = vec!["--url", server.url.as_str(), "health"];
+        if binary == HUDSON {
+            args.insert(0, "agent");
+        }
+        let output = cli(binary, &args, 1).await;
+        assert!(
+            output.stdout.is_empty(),
+            "failed API body was printed to stdout"
+        );
+        assert!(String::from_utf8_lossy(&output.stderr).contains("401"));
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn agent_execution_errors_are_json_only_when_requested() {
+    let server = Server::http(vec![
+        Reply {
+            status: "409 Conflict",
+            body: json!({"error":"fixture-private-token"}),
+            headers: "",
+        },
+        Reply::ok(json!({"status":"ok"})),
+    ])
+    .await;
+    let output = cli(
+        HUDSON,
+        &["agent", "--url", &server.url, "health", "--json"],
+        1,
+    )
+    .await;
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"], "http");
+    assert_eq!(error["http_status"], 409);
+    assert!(error["message"].as_str().unwrap().contains("409"));
+    let output = cli(AGENT, &["--url", &server.url, "--json", "health"], 0).await;
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"status":"ok"})
+    );
+}
+
+#[tokio::test]
+async fn agent_error_status_survives_non_json_bodies_and_transport_errors_hide_urls() {
+    let response = b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n<html>fixture-private-token</html>".to_vec();
+    let server = Server::raw_http(response).await;
+    let output = cli(
+        HUDSON,
+        &["agent", "--url", &server.url, "--json", "health"],
+        1,
+    )
+    .await;
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["http_status"], 503);
+    assert_eq!(error["error"], "http");
+    let server = Server::raw_http(Vec::new()).await;
+    let url = format!("{}/fixture-private-token", server.url);
+    let output = cli(HUDSON, &["agent", "--url", &url, "--json", "health"], 1).await;
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"], "transport");
+    assert!(error["http_status"].is_null());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains(&server.url));
 }
 
 #[tokio::test]

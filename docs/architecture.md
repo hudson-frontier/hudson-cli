@@ -58,3 +58,8 @@ The CLI version, adapters, output contracts and delivery belong to this product.
 Service API contracts and SDK wire models stay with their product owners. Rust
 keeps the executable and existing clients in one toolchain, while immutable SDK
 revisions make compatibility changes reviewable.
+
+Agent API failures are checked before response decoding or output. Execution
+errors use stderr; `--json` selects a stable error envelope for scripts without
+changing ordinary successful API results or exit codes. Transport failures omit
+request URLs, and server error bodies are not echoed into terminal output.

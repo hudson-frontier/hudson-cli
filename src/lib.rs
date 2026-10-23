@@ -59,10 +59,39 @@ fn parse(args: &[OsString]) -> Result<Invocation, clap::Error> {
 }
 
 fn agent_execute(args: agent::commands::Args) -> ExitCode {
+    let json = args.json;
     match agent::client::execute(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("{error}");
+            let (kind, status, message) = if let Some(http) =
+                error.downcast_ref::<agent::client::HttpFailure>()
+            {
+                ("http", Some(http.0.as_u16()), http.to_string())
+            } else if let Some(request) = error.downcast_ref::<reqwest::Error>() {
+                let (kind, message) = if request.is_timeout() {
+                    ("timeout", "Agent API request timed out. Inspect the outcome before retrying a mutation.")
+                } else if request.is_decode() {
+                    ("protocol", "Agent API returned an invalid JSON response.")
+                } else if request.is_builder() {
+                    ("configuration", "Cannot configure the agent API request. Check the URL and connection options.")
+                } else {
+                    (
+                        "transport",
+                        "Agent API request failed. Inspect the outcome before retrying a mutation.",
+                    )
+                };
+                (kind, None, message.to_owned())
+            } else {
+                ("client", None, error.to_string())
+            };
+            if json {
+                eprintln!(
+                    "{}",
+                    serde_json::json!({"error":kind,"http_status":status,"message":message})
+                );
+            } else {
+                eprintln!("{message}");
+            }
             ExitCode::FAILURE
         }
     }
