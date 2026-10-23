@@ -55,8 +55,14 @@ async fn cli_input(binary: &str, args: &[&str], input: Option<&[u8]>, code: i32)
         output.status.code(),
         Some(code),
         "{args:?}: stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stdout)
+            .chars()
+            .take(2000)
+            .collect::<String>(),
         String::from_utf8_lossy(&output.stderr)
+            .chars()
+            .take(2000)
+            .collect::<String>()
     );
     assert!(!String::from_utf8_lossy(&output.stderr).contains("fixture-private-token"));
     output
@@ -396,6 +402,51 @@ async fn agent_error_status_survives_non_json_bodies_and_transport_errors_hide_u
     assert_eq!(error["error"], "transport");
     assert!(error["http_status"].is_null());
     assert!(!String::from_utf8_lossy(&output.stderr).contains(&server.url));
+}
+
+#[tokio::test]
+async fn agent_large_responses_are_rejected_before_output() {
+    let body = serde_json::to_vec(&json!({"data":"x".repeat(8 * 1024 * 1024)})).unwrap();
+    let mut response =
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n".to_vec();
+    response.extend(body);
+    let server = Server::raw_http(response).await;
+    let output = cli(
+        HUDSON,
+        &["agent", "--url", &server.url, "--json", "health"],
+        1,
+    )
+    .await;
+    assert!(output.stdout.is_empty());
+    let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+    assert_eq!(error["error"], "protocol");
+    assert!(error["message"].as_str().unwrap().contains("8 MiB"));
+}
+
+#[tokio::test]
+async fn agent_response_bounds_cover_advertised_lengths_and_invalid_json() {
+    for (response, expected) in [
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Length: 8388609\r\nConnection: close\r\n\r\n{}".to_vec(),
+            "8 MiB",
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{invalid fixture-private-token".to_vec(),
+            "invalid JSON",
+        ),
+    ] {
+        let server = Server::raw_http(response).await;
+        let output = cli(
+            HUDSON,
+            &["agent", "--url", &server.url, "--json", "health"],
+            1,
+        )
+        .await;
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"], "protocol");
+        assert!(error["message"].as_str().unwrap().contains(expected));
+    }
 }
 
 #[tokio::test]

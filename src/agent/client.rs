@@ -13,6 +13,39 @@ impl std::fmt::Display for HttpFailure {
 
 impl std::error::Error for HttpFailure {}
 
+#[derive(Debug)]
+pub(crate) struct ProtocolFailure(pub &'static str);
+
+impl std::fmt::Display for ProtocolFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+impl std::error::Error for ProtocolFailure {}
+
+const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
+
+fn read_response(
+    response: reqwest::blocking::Response,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_RESPONSE_BYTES)
+    {
+        return Err(ProtocolFailure("Agent API response exceeds 8 MiB").into());
+    }
+    let mut bytes = Vec::new();
+    response.take(MAX_RESPONSE_BYTES + 1).read_to_end(&mut bytes).map_err(|_| {
+        ProtocolFailure("Agent API response could not be read completely. Inspect the outcome before retrying a mutation.")
+    })?;
+    if bytes.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(ProtocolFailure("Agent API response exceeds 8 MiB").into());
+    }
+    Ok(serde_json::from_slice(&bytes)
+        .map_err(|_| ProtocolFailure("Agent API returned an invalid JSON response"))?)
+}
+
 fn segment(id: &str) -> Result<&str, Box<dyn std::error::Error>> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return Err("invalid ID".into());
@@ -151,7 +184,7 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     if !status.is_success() {
         return Err(HttpFailure(status).into());
     }
-    let body: Value = response.json()?;
+    let body = read_response(response)?;
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
 }
