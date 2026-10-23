@@ -7,3 +7,5 @@ Wait for branch CI success before creating a PR; squash merge only after latest
 PR checks pass, the branch is current and review conversations are resolved.
 Keep distinct functional fixes in distinct PRs. Never push directly to main or
 bypass checks. Do not publish releases without an explicit release request.
+Describe Hudson's own design and behavior in committed documentation. Keep
+third-party comparison notes out of docs, PR descriptions and commit messages.
