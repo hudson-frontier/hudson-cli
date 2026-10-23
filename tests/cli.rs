@@ -13,6 +13,10 @@ const SANDBOX: &str = env!("CARGO_BIN_EXE_hudsonbox");
 const RUN: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
 async fn cli(binary: &str, args: &[&str], code: i32) -> Output {
+    cli_input(binary, args, None, code).await
+}
+
+async fn cli_input(binary: &str, args: &[&str], input: Option<&[u8]>, code: i32) -> Output {
     let mut child = tokio::process::Command::new(binary);
     child
         .args(args)
@@ -24,10 +28,29 @@ async fn cli(binary: &str, args: &[&str], code: i32) -> Output {
         .env_remove("http_proxy")
         .env_remove("https_proxy")
         .env_remove("all_proxy");
-    let output = tokio::time::timeout(Duration::from_secs(15), child.output())
-        .await
-        .unwrap()
-        .unwrap();
+    use std::process::Stdio;
+    child
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = tokio::time::timeout(Duration::from_secs(15), async {
+        let mut child = child.spawn().unwrap();
+        if let Some(input) = input {
+            let mut stdin = child.stdin.take().unwrap();
+            if let Err(error) = stdin.write_all(input).await {
+                assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+                assert_ne!(code, 0);
+            }
+        }
+        child.wait_with_output().await
+    })
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(
         output.status.code(),
         Some(code),
@@ -169,6 +192,47 @@ async fn help_and_versions_are_offline_for_all_entrypoints() {
             .unwrap()
             .contains(env!("CARGO_PKG_VERSION")));
     }
+}
+
+#[tokio::test]
+async fn shell_completion_discovers_products_and_options_offline() {
+    for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
+        let output = cli(HUDSON, &["completion", shell], 0).await;
+        let script = String::from_utf8(output.stdout).unwrap();
+        for item in ["hudson", "agent", "sandbox", "key-file", "agent-version"] {
+            assert!(script.contains(item), "missing {item} for {shell}");
+        }
+        assert!(output.stderr.is_empty());
+    }
+    cli(HUDSON, &["completion", "unsupported-shell"], 2).await;
+}
+
+#[tokio::test]
+async fn agent_pipeline_preserves_explicit_json_values() {
+    let server = Server::http(vec![Reply::ok(json!({"run_id":RUN}))]).await;
+    let input = br#"{"task":"@literal-value","items":[1,true]}"#;
+    cli_input(
+        HUDSON,
+        &[
+            "agent",
+            "--url",
+            &server.url,
+            "start",
+            "--input-file",
+            "-",
+            "--request-key",
+            "stdin-agent-key-0001",
+        ],
+        Some(input),
+        0,
+    )
+    .await;
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].body["input"],
+        serde_json::from_slice::<Value>(input).unwrap()
+    );
 }
 
 #[tokio::test]
@@ -402,6 +466,109 @@ mod sandbox_https {
             .iter()
             .all(|r| r.headers["authorization"] == "Bearer fixture-private-token"));
         assert_eq!(requests.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn sandbox_pipeline_preserves_request_values_and_mutation_keys() {
+        let admitted = json!({"sandbox_id":"sbx_fixture","operation_id":"op_fixture","status":"admitted","status_url":"/v1/operations/op_fixture"});
+        let p = Profile::new(vec![
+            Reply {
+                status: "202 Accepted",
+                body: admitted.clone(),
+                headers: "",
+            },
+            Reply {
+                status: "202 Accepted",
+                body: admitted,
+                headers: "",
+            },
+        ])
+        .await;
+        let create = json!({"image_digest":format!("sha256:{}", "a".repeat(64)),"name":"@literal-file-name","resources":{"vcpu":1,"memory_mib":128,"disk_mib":64}});
+        cli_input(
+            HUDSON,
+            &[
+                "sandbox",
+                "--config",
+                &p.config,
+                "--json",
+                "create",
+                "--request",
+                "-",
+                "--key",
+                "stdin-create-key-0001",
+            ],
+            Some(&serde_json::to_vec(&create).unwrap()),
+            0,
+        )
+        .await;
+        let execute = json!({"argv":["printf","@literal-value"],"deadline_unix_ms":4102444800000_i64,"expected_generation":4});
+        cli_input(
+            SANDBOX,
+            &[
+                "--config",
+                &p.config,
+                "--json",
+                "execute",
+                "sbx_fixture",
+                "--request",
+                "-",
+                "--key",
+                "stdin-execute-key-0001",
+            ],
+            Some(&serde_json::to_vec(&execute).unwrap()),
+            0,
+        )
+        .await;
+        let requests = p.server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].path, "/v1/sandboxes");
+        assert_eq!(requests[0].body["name"], "@literal-file-name");
+        assert_eq!(
+            requests[0].headers["idempotency-key"],
+            "stdin-create-key-0001"
+        );
+        assert_eq!(requests[1].body["argv"], execute["argv"]);
+        assert_eq!(requests[1].body["expected_generation"], 4);
+        assert_eq!(
+            requests[1].headers["idempotency-key"],
+            "stdin-execute-key-0001"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_or_oversized_piped_requests_fail_before_sending() {
+        let p = Profile::new(vec![Reply::ok(json!({}))]).await;
+        let mut body = json!({"image_digest":format!("sha256:{}", "a".repeat(64)),"name":"","resources":{"vcpu":1,"memory_mib":128,"disk_mib":64}});
+        let overhead = serde_json::to_vec(&body).unwrap().len();
+        body["name"] = json!("x".repeat(65537 - overhead));
+        let large = serde_json::to_vec(&body).unwrap();
+        assert_eq!(large.len(), 65537);
+        for input in [b"{".as_slice(), large.as_slice()] {
+            let output = cli_input(
+                HUDSON,
+                &[
+                    "sandbox",
+                    "--config",
+                    &p.config,
+                    "--json",
+                    "create",
+                    "--request",
+                    "-",
+                    "--key",
+                    "stdin-invalid-key-0001",
+                ],
+                Some(input),
+                1,
+            )
+            .await;
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stderr).unwrap()["error"],
+                "request"
+            );
+        }
+        assert!(p.server.requests.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

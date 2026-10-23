@@ -26,6 +26,22 @@ clients. Windows supports the agent client and offline sandbox commands such as
 permission checks, so sandbox API commands on Windows return a configuration
 error. Use a Linux environment such as WSL for those commands.
 
+## Shell completion
+
+Generate completion from the installed command definitions. Supported shells are
+`bash`, `zsh`, `fish`, `powershell` and `elvish`. Generation works offline and
+does not load credentials or change your shell configuration.
+
+```console
+hudson completion bash > hudson.bash
+hudson completion zsh > _hudson
+hudson completion fish > hudson.fish
+hudson completion powershell > hudson.ps1
+```
+
+Load the generated script using your shell's completion configuration. Regenerate
+it after upgrading to include new commands and flags.
+
 ## Agent commands
 
 `hudson agent` provides interactive sessions, health and capabilities, immutable
@@ -75,6 +91,17 @@ hudson sandbox key --to create.key
 hudson sandbox --config /private/client.json --json create --request create.json --key-file create.key
 hudson sandbox --config /private/client.json --json wait OPERATION_ID --seconds 60
 ```
+
+Create and execute also accept `--request -` to read one JSON document, up to
+64 KiB, from stdin. For example, on a Unix shell:
+
+```sh
+cat create.json | hudson sandbox --config /private/client.json --json create --request - --key-file create.key
+```
+
+Input is consumed only when `-` is selected. Request values are data and never
+implicitly read local files. Save and reuse the mutation key with the same
+request when reconciling an uncertain outcome.
 
 Create, execute, destroy and cancel return admission handles before completion.
 Mutations are not automatically retried. Stopping observation does not cancel an

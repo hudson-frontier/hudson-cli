@@ -24,6 +24,11 @@ enum Product {
     Agent(agent::commands::Args),
     /// Manage Hudsonbox sandboxes through the project HTTPS API.
     Sandbox(sandbox::Cli),
+    /// Print a shell completion script without connecting to a service.
+    Completion {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 enum Invocation {
@@ -87,6 +92,23 @@ pub fn main_entry() -> ExitCode {
         Invocation::Product(Cli {
             product: Product::Sandbox(args),
         }) => sandbox_execute(args),
+        Invocation::Product(Cli {
+            product: Product::Completion { shell },
+        }) => completion(shell),
+    }
+}
+
+fn completion(shell: clap_complete::Shell) -> ExitCode {
+    use clap::CommandFactory;
+    use clap_complete::Generator;
+    let mut command = Cli::command().bin_name("hudson");
+    command.build();
+    match shell.try_generate(&command, &mut std::io::stdout().lock()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(_) => {
+            eprintln!("cannot write shell completion script");
+            ExitCode::FAILURE
+        }
     }
 }
 

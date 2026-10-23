@@ -3,7 +3,7 @@ use clap::{Args, Parser, Subcommand};
 use sandbox_client::{models::*, requests::*, Client, Error, Event};
 use serde::Serialize;
 use std::{
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -72,6 +72,7 @@ enum Command {
     },
     /// Admit creation from a saved JSON request. Returns before completion.
     Create {
+        /// JSON request file, or - to read one bounded document from stdin.
         #[arg(long)]
         request: PathBuf,
         #[command(flatten)]
@@ -88,6 +89,7 @@ enum Command {
     /// Admit a command from saved JSON including an absolute deadline_unix_ms.
     Execute {
         sandbox_id: String,
+        /// JSON request file, or - to read one bounded document from stdin.
         #[arg(long)]
         request: PathBuf,
         #[command(flatten)]
@@ -260,7 +262,16 @@ fn operation_exit(value: &OperationBody) -> u8 {
     }
 }
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Error> {
-    let bytes = sandbox_client::read_upload(path)?;
+    let bytes = if path == Path::new("-") {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .take(65537)
+            .read_to_end(&mut bytes)
+            .map_err(|_| Error::File)?;
+        bytes
+    } else {
+        sandbox_client::read_upload(path)?
+    };
     if bytes.len() > 65536 {
         return Err(Error::Request);
     }

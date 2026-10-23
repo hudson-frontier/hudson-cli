@@ -40,18 +40,21 @@ are forbidden. CI exercises the executable boundaries against local protocol
 fixtures. Backend contract suites and runtime qualification remain in their
 owning repositories.
 
-## Public reference patterns
+## Command discovery and automation
 
-OpenAI publishes a dedicated [OpenAI CLI repository](https://github.com/openai/openai-cli).
-Its [go.mod](https://github.com/openai/openai-cli/blob/main/go.mod) pins a Go SDK
-dependency. Its [contributor guide](https://github.com/openai/openai-cli/blob/main/CONTRIBUTING.md)
-separates generated API commands, handwritten features and executable wiring;
-its [GoReleaser configuration](https://github.com/openai/openai-cli/blob/main/.goreleaser.yml)
-owns platform builds and packaging. The [official CLI documentation](https://developers.openai.com/api/docs/libraries/openai-cli)
-documents standalone installation and resource-based commands.
+Hudson's command model is the source for both help and shell completion.
+`hudson completion SHELL` emits a script for the selected shell without loading
+service configuration or credentials. It lists both product namespaces and their
+operation flags. Operators decide where to save or load the script; generating
+one never edits shell startup files.
 
-We adopt those repository boundaries: a separately versioned executable,
-explicit SDK dependencies, isolated product adapters and independent delivery.
-We retain Rust to reuse the current clients and tests. These public sources show
-repository structure; they do not establish OpenAI's internal team organization.
-No OpenAI implementation code is included.
+Automation selects its input source explicitly. Sandbox create and execute accept
+`--request -` for a single JSON document from stdin, with the same 64 KiB limit as
+saved request files. Request content never triggers implicit local file reads.
+Credentials still come from the private operator profile, and mutation keys remain
+explicit. Upload paths and key-file paths retain their existing file semantics.
+
+The CLI version, adapters, output contracts and delivery belong to this product.
+Service API contracts and SDK wire models stay with their product owners. Rust
+keeps the executable and existing clients in one toolchain, while immutable SDK
+revisions make compatibility changes reviewable.
