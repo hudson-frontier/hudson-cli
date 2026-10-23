@@ -2,6 +2,17 @@ use super::commands::{Args, Command, Start};
 use serde_json::{json, Value};
 use std::io::Read;
 
+#[derive(Debug)]
+pub(crate) struct HttpFailure(pub reqwest::StatusCode);
+
+impl std::fmt::Display for HttpFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Hudson returned {}", self.0)
+    }
+}
+
+impl std::error::Error for HttpFailure {}
+
 fn segment(id: &str) -> Result<&str, Box<dyn std::error::Error>> {
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
         return Err("invalid ID".into());
@@ -137,11 +148,11 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             .send()?,
     };
     let status = response.status();
+    if !status.is_success() {
+        return Err(HttpFailure(status).into());
+    }
     let body: Value = response.json()?;
     println!("{}", serde_json::to_string_pretty(&body)?);
-    if !status.is_success() {
-        return Err(format!("Hudson returned {status}").into());
-    }
     Ok(())
 }
 

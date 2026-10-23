@@ -61,6 +61,18 @@ hudson agent --help
 connections require HTTPS or loopback HTTP. Ordinary API results are JSON;
 `follow` emits JSON records, and the interactive session renders terminal text.
 
+Execution failures go to stderr and return exit code `1`. Failed API bodies are
+never emitted as successful output. Select `--json` for an execution error
+document containing `error`, `http_status` (when available) and `message`:
+
+```console
+hudson agent --url http://127.0.0.1:4318 --json health
+```
+
+Successful API output remains JSON with or without this flag. Argument errors
+retain normal usage diagnostics and exit code `2`. Transport diagnostics omit
+the request URL and response body.
+
 ## Sandbox commands
 
 `hudson sandbox` uses the public Hudsonbox SDK for sandbox creation, execution,

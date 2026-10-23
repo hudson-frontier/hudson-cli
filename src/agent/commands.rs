@@ -8,6 +8,9 @@ pub struct Args {
     /// Read the bearer token from this environment variable, never from an argument.
     #[arg(long)]
     pub api_token_env: Option<String>,
+    /// Report execution errors as JSON on stderr. API success output is already JSON.
+    #[arg(long, global = true)]
+    pub json: bool,
     #[command(subcommand)]
     pub command: Option<Command>,
 }
