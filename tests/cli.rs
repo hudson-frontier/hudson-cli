@@ -12,12 +12,20 @@ const AGENT: &str = env!("CARGO_BIN_EXE_hudson-cli");
 const SANDBOX: &str = env!("CARGO_BIN_EXE_hudsonbox");
 const RUN: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
+fn binary_path(binary: &str) -> std::path::PathBuf {
+    match std::env::var_os("HUDSON_TEST_BIN_DIR") {
+        Some(directory) => std::path::PathBuf::from(directory)
+            .join(std::path::Path::new(binary).file_name().unwrap()),
+        None => binary.into(),
+    }
+}
+
 async fn cli(binary: &str, args: &[&str], code: i32) -> Output {
     cli_input(binary, args, None, code).await
 }
 
 async fn cli_input(binary: &str, args: &[&str], input: Option<&[u8]>, code: i32) -> Output {
-    let mut child = tokio::process::Command::new(binary);
+    let mut child = tokio::process::Command::new(binary_path(binary));
     child
         .args(args)
         .kill_on_drop(true)
@@ -454,7 +462,7 @@ async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
     use std::process::Stdio;
     for binary in [HUDSON, AGENT] {
         let server = Server::http(vec![Reply::ok(json!({"status":"ok"}))]).await;
-        let mut command = tokio::process::Command::new(binary);
+        let mut command = tokio::process::Command::new(binary_path(binary));
         if binary == HUDSON {
             command.arg("agent");
         }
@@ -487,6 +495,167 @@ async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
         assert_eq!(error["error"], "client");
         assert!(error["message"].as_str().unwrap().contains("output"));
         assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+    }
+}
+
+#[tokio::test]
+async fn agent_command_routes_and_payloads_are_preserved() {
+    let operation = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+    let directory = tempfile::tempdir().unwrap();
+    let tool_file = directory.path().join("tool.json");
+    let agent_file = directory.path().join("agent.json");
+    let tool_body =
+        json!({"request_key":"tool-publication-001","tool":{"id":"search","version":1}});
+    let agent_body =
+        json!({"request_key":"agent-publication-001","agent":{"id":"analyst","version":1}});
+    std::fs::write(&tool_file, serde_json::to_vec(&tool_body).unwrap()).unwrap();
+    std::fs::write(&agent_file, serde_json::to_vec(&agent_body).unwrap()).unwrap();
+    let cases = vec![
+        (
+            vec!["capabilities"],
+            "GET",
+            "/capabilities".to_owned(),
+            Value::Null,
+        ),
+        (
+            vec!["publish-tool", tool_file.to_str().unwrap()],
+            "POST",
+            "/tools".to_owned(),
+            tool_body,
+        ),
+        (
+            vec!["publish-agent", agent_file.to_str().unwrap()],
+            "POST",
+            "/agents".to_owned(),
+            agent_body,
+        ),
+        (
+            vec!["tool", "search", "1"],
+            "GET",
+            "/tools/search/versions/1".to_owned(),
+            Value::Null,
+        ),
+        (
+            vec!["agent", "analyst", "1"],
+            "GET",
+            "/agents/analyst/versions/1".to_owned(),
+            Value::Null,
+        ),
+        (
+            vec![
+                "steer",
+                RUN,
+                "--text",
+                "direction",
+                "--request-key",
+                "direction-001",
+            ],
+            "POST",
+            format!("/runs/{RUN}/messages"),
+            json!({"kind":"steer","input":"direction","request_key":"direction-001"}),
+        ),
+        (
+            vec![
+                "follow-up",
+                RUN,
+                "--text",
+                "next task",
+                "--request-key",
+                "followup-001",
+            ],
+            "POST",
+            format!("/runs/{RUN}/messages"),
+            json!({"kind":"follow_up","input":"next task","request_key":"followup-001"}),
+        ),
+        (
+            vec!["inbox", RUN],
+            "GET",
+            format!("/runs/{RUN}/messages"),
+            Value::Null,
+        ),
+        (
+            vec!["clear-inbox", RUN],
+            "DELETE",
+            format!("/runs/{RUN}/messages"),
+            Value::Null,
+        ),
+        (
+            vec![
+                "reply",
+                RUN,
+                "--question-id",
+                "7",
+                "--text",
+                "answer",
+                "--request-key",
+                "reply-001",
+            ],
+            "POST",
+            format!("/runs/{RUN}/input"),
+            json!({"question_id":7,"input":"answer","request_key":"reply-001"}),
+        ),
+        (
+            vec!["resume", RUN],
+            "POST",
+            format!("/runs/{RUN}/resume"),
+            Value::Null,
+        ),
+        (vec!["get", RUN], "GET", format!("/runs/{RUN}"), Value::Null),
+        (
+            vec!["children", RUN],
+            "GET",
+            format!("/runs/{RUN}/children"),
+            Value::Null,
+        ),
+        (
+            vec!["operation", operation],
+            "GET",
+            format!("/operations/{operation}"),
+            Value::Null,
+        ),
+        (
+            vec!["events", RUN, "--after", "42"],
+            "GET",
+            format!("/runs/{RUN}/events?after=42"),
+            Value::Null,
+        ),
+        (
+            vec!["approve", operation],
+            "POST",
+            format!("/operations/{operation}/approval"),
+            json!({"approved":true}),
+        ),
+        (
+            vec!["approve", operation, "--deny"],
+            "POST",
+            format!("/operations/{operation}/approval"),
+            json!({"approved":false}),
+        ),
+        (
+            vec!["cancel", RUN],
+            "POST",
+            format!("/runs/{RUN}/cancel"),
+            Value::Null,
+        ),
+    ];
+    let server = Server::http(
+        cases
+            .iter()
+            .map(|_| Reply::ok(json!({"ok":true})))
+            .collect(),
+    )
+    .await;
+    for (arguments, _, _, _) in &cases {
+        let mut args = vec!["agent", "--url", server.url.as_str()];
+        args.extend(arguments);
+        cli(HUDSON, &args, 0).await;
+    }
+    let requests = server.requests.lock().unwrap();
+    assert_eq!(requests.len(), cases.len());
+    for (request, (_, method, path, body)) in requests.iter().zip(cases) {
+        assert_eq!(request.method, method);
+        assert_eq!(request.path, path);
+        assert_eq!(request.body, body);
     }
 }
 

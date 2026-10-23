@@ -9,6 +9,7 @@ Use a focused branch. Run these checks with the pinned toolchain before pushing:
 ```console
 cargo fmt --all -- --check
 cargo clippy --all-targets --locked -- -D warnings
+cargo build --bins --locked
 cargo test --all-targets --locked
 ```
 
@@ -34,7 +35,8 @@ Dependency updates include an explicit SDK revision, the lockfile and matching
 contract validation. Keep SDK wire types and server business rules in their
 product repositories. Application Rust modules here are not a public SDK.
 
-Releases will use an independent CLI version. There is no automated publishing
-workflow yet. Before adding one, agree on supported targets, archive names,
-checksums, signing, package registries and release authorization. Do not publish
-tags, releases or packages as part of an ordinary code change.
+Release versions are independent of backend versions. CI builds and installs
+native release archives on every supported target. See [release maintenance](docs/releasing.md)
+for the qualification and draft publication gates. Publishing requires an
+explicit release request; never publish tags or packages as an ordinary code
+change. The documented archive support and signing limits must remain accurate.

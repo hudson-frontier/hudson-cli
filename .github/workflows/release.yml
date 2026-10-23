@@ -1,0 +1,133 @@
+name: Publish CLI release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run:
+        description: Successful main-branch CLI checks run containing all native archives
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-cli-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main' && github.repository == 'hudson-frontier/hudson-cli'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Require qualified current main source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+        run: python scripts/release.py verify-run --ci-run "$CI_RUN"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.ci_run }}
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/hudson-release
+      - name: Verify all archives and checksum manifests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+        run: python scripts/release.py compose --ci-run "$CI_RUN" --directory "$RUNNER_TEMP/hudson-release"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-ready
+          path: ${{ runner.temp }}/hudson-release/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  draft:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-ready
+          path: ${{ runner.temp }}/hudson-release
+      - name: Create or resume matching draft and upload qualified files
+        id: create
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+        run: python scripts/release.py draft --ci-run "$CI_RUN" --directory "$RUNNER_TEMP/hudson-release"
+
+  verify-upload:
+    needs: draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-ready
+          path: ${{ runner.temp }}/hudson-release
+      - name: Download draft assets and verify exact tested bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: python scripts/release.py verify-download --ci-run "$CI_RUN" --release-id "$RELEASE_ID" --directory "$RUNNER_TEMP/hudson-release"
+
+  publish:
+    needs: [draft, verify-upload]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-ready
+          path: ${{ runner.temp }}/hudson-release
+      - name: Publish the verified draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+          RELEASE_ID: ${{ needs.draft.outputs.release_id }}
+        run: python scripts/release.py publish --ci-run "$CI_RUN" --release-id "$RELEASE_ID" --directory "$RUNNER_TEMP/hudson-release"
