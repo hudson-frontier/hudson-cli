@@ -1,0 +1,8 @@
+Hudson CLI
+Copyright 2026 Hudson contributors
+
+The initial agent adapter is derived from hudson-frontier/hudson,
+crates/hudson-cli, revision 44e81c64a43cadf61cefe42b077e7eb6997c7875.
+The initial sandbox adapter is derived from hudson-frontier/hudsonbox,
+crates/sandbox-cli, revision df4b53cb8e3e22bd808b0e61f25ac43f3eaeb976.
+Both source projects are licensed under Apache-2.0.
