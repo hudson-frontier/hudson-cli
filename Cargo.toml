@@ -1,0 +1,40 @@
+[package]
+name = "hudson-cli"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.92"
+license = "Apache-2.0"
+description = "Unified command-line interface for Hudson products"
+repository = "https://github.com/hudson-frontier/hudson-cli"
+publish = false
+default-run = "hudson"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "rustls-tls"] }
+sandbox-client = { git = "https://github.com/hudson-frontier/hudsonbox.git", rev = "df4b53cb8e3e22bd808b0e61f25ac43f3eaeb976" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "=3.27.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+rcgen = "0.14"
+tokio = { version = "1", features = ["net", "io-util", "process"] }
+tokio-rustls = { version = "=0.26.5", default-features = false, features = ["ring", "tls12"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[[bin]]
+name = "hudson"
+path = "src/bin/hudson.rs"
+
+[[bin]]
+name = "hudson-cli"
+path = "src/bin/hudson-cli.rs"
+
+[[bin]]
+name = "hudsonbox"
+path = "src/bin/hudsonbox.rs"
