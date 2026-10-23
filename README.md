@@ -72,6 +72,9 @@ hudson agent --url http://127.0.0.1:4318 --json health
 Successful API output remains JSON with or without this flag. Argument errors
 retain normal usage diagnostics and exit code `2`. Transport diagnostics omit
 the request URL and response body.
+Ordinary agent responses are limited to 8 MiB before decoding or output. Larger,
+truncated or invalid JSON responses fail with a protocol diagnostic and no
+payload on stdout. Event following retains its bounded, record-oriented output.
 
 ## Sandbox commands
 

@@ -63,3 +63,6 @@ Agent API failures are checked before response decoding or output. Execution
 errors use stderr; `--json` selects a stable error envelope for scripts without
 changing ordinary successful API results or exit codes. Transport failures omit
 request URLs, and server error bodies are not echoed into terminal output.
+Ordinary agent reads enforce an 8 MiB response limit while consuming the body,
+including responses without a declared length. JSON is decoded only after the
+bounded read succeeds, and stdout is written only after decoding succeeds.

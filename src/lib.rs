@@ -67,6 +67,8 @@ fn agent_execute(args: agent::commands::Args) -> ExitCode {
                 error.downcast_ref::<agent::client::HttpFailure>()
             {
                 ("http", Some(http.0.as_u16()), http.to_string())
+            } else if let Some(protocol) = error.downcast_ref::<agent::client::ProtocolFailure>() {
+                ("protocol", None, protocol.to_string())
             } else if let Some(request) = error.downcast_ref::<reqwest::Error>() {
                 let (kind, message) = if request.is_timeout() {
                     ("timeout", "Agent API request timed out. Inspect the outcome before retrying a mutation.")
