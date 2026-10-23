@@ -450,6 +450,47 @@ async fn agent_response_bounds_cover_advertised_lengths_and_invalid_json() {
 }
 
 #[tokio::test]
+async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
+    use std::process::Stdio;
+    for binary in [HUDSON, AGENT] {
+        let server = Server::http(vec![Reply::ok(json!({"status":"ok"}))]).await;
+        let mut command = tokio::process::Command::new(binary);
+        if binary == HUDSON {
+            command.arg("agent");
+        }
+        let mut child = command
+            .args(["--url", &server.url, "--json", "health"])
+            .env_remove("HTTP_PROXY")
+            .env_remove("HTTPS_PROXY")
+            .env_remove("ALL_PROXY")
+            .env_remove("http_proxy")
+            .env_remove("https_proxy")
+            .env_remove("all_proxy")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take());
+        let output = tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"], "client");
+        assert!(error["message"].as_str().unwrap().contains("output"));
+        assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
+    }
+}
+
+#[tokio::test]
 async fn invalid_commands_fail_before_io() {
     // Parse errors must not reinterpret invalid product arguments as another request.
     cli(

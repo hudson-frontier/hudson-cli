@@ -1,6 +1,6 @@
 use super::commands::{Args, Command, Start};
 use serde_json::{json, Value};
-use std::io::Read;
+use std::io::{Read, Write};
 
 #[derive(Debug)]
 pub(crate) struct HttpFailure(pub reqwest::StatusCode);
@@ -185,7 +185,13 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         return Err(HttpFailure(status).into());
     }
     let body = read_response(response)?;
-    println!("{}", serde_json::to_string_pretty(&body)?);
+    let mut output = std::io::stdout().lock();
+    writeln!(output, "{}", serde_json::to_string_pretty(&body)?).map_err(|_| {
+        "cannot write agent response output; inspect the outcome before retrying a mutation"
+    })?;
+    output.flush().map_err(|_| {
+        "cannot flush agent response output; inspect the outcome before retrying a mutation"
+    })?;
     Ok(())
 }
 
