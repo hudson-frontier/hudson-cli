@@ -20,20 +20,25 @@ jobs:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
-    env:
-      # Keep incomplete runner-image toolchain components out of the build.
-      RUSTUP_HOME: ${{ runner.temp }}/hudson-cli-rustup
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain
+        env:
+          RUSTUP_HOME: ${{ runner.temp }}/hudson-cli-rustup
         run: rustup show active-toolchain
       - name: Check formatting
+        env:
+          RUSTUP_HOME: ${{ runner.temp }}/hudson-cli-rustup
         run: cargo fmt --all -- --check
       - name: Check lint warnings
+        env:
+          RUSTUP_HOME: ${{ runner.temp }}/hudson-cli-rustup
         run: cargo clippy --all-targets --locked -- -D warnings
       - name: Test commands and API contracts
+        env:
+          RUSTUP_HOME: ${{ runner.temp }}/hudson-cli-rustup
         run: cargo test --all-targets --locked
 
   policy:
@@ -41,6 +46,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate GitHub workflow
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 .github/workflows/ci.yml
       - name: Check pull request title
         if: github.event_name == 'pull_request'
         env:

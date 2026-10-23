@@ -12,6 +12,8 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --all-targets --locked
 ```
 
+CI also validates the workflow with actionlint 1.7.12 and checks the PR title.
+
 The process tests use local HTTP and self-signed HTTPS fixtures with synthetic
 credentials. They check public requests and outputs without a product database,
 model provider or virtual machine. These tests do not establish guest runtime or
