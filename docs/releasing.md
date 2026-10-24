@@ -75,13 +75,15 @@ The workflow:
    and creates the aggregate `SHA256SUMS` file with read-only permissions.
 3. Creates or resumes only a matching draft and uploads the qualified files.
    Existing published releases and conflicting tags are never overwritten.
-4. Downloads the uploaded draft files in a separate read-only job and compares
+4. Downloads the uploaded draft files in a separate verification job and compares
    their bytes with the already installed and tested archives.
 5. Rechecks source and CI, then publishes the verified draft and version tag.
 
 Application executables run only during read-only build/install validation.
-Repository write permission is confined to draft administration and publication.
-The publishing jobs do not run packaged application code or rebuild artifacts.
+GitHub requires repository write permission to inspect an unpublished draft,
+so draft administration, uploaded-asset verification and publication jobs have
+that permission. Verification only reads metadata and downloads and hashes files.
+These jobs do not run packaged application code or rebuild artifacts.
 
 Failures before final publication leave any created release as a draft. Investigate the failed check and
 retry failed jobs only after understanding the cause. Do not replace assets to
