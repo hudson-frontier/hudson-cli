@@ -466,11 +466,13 @@ async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
     use std::process::Stdio;
     for binary in [HUDSON, AGENT] {
         let server = Server::http(vec![Reply::ok(json!({"status":"ok"}))]).await;
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
         let mut command = tokio::process::Command::new(binary_path(binary));
         if binary == HUDSON {
             command.arg("agent");
         }
-        let mut child = command
+        let child = command
             .args(["--url", &server.url, "--json", "health"])
             .env_remove("HTTP_PROXY")
             .env_remove("HTTPS_PROXY")
@@ -479,12 +481,11 @@ async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
             .env_remove("https_proxy")
             .env_remove("all_proxy")
             .stdin(Stdio::null())
-            .stdout(Stdio::piped())
+            .stdout(Stdio::from(writer))
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .unwrap();
-        drop(child.stdout.take());
         let output = tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
             .await
             .unwrap()

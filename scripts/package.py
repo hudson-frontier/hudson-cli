@@ -331,6 +331,10 @@ def install_test(archive: Path) -> None:
             subprocess.run([sys.executable, 'scripts/check_session.py', '--binary',
                             str(Path(environment['HUDSON_TEST_BIN_DIR']) / 'hudson')],
                            cwd=ROOT, env=environment, check=True)
+        if manifest['target'].endswith('-unknown-linux-gnu'):
+            subprocess.run([sys.executable, 'scripts/check_response_memory.py', '--binary-dir',
+                            environment['HUDSON_TEST_BIN_DIR']],
+                           cwd=ROOT, env=environment, check=True)
 
 
 def main() -> None:
