@@ -23,6 +23,7 @@ hudson agent --url https://agent.example.com --api-token-env HUDSON_API_TOKEN he
 Use trusted HTTPS or loopback HTTP. Authenticated URLs cannot contain user
 information, query strings or fragments. Connection options precede the operation.
 Agent and sandbox credentials remain independent.
+Authenticated loopback HTTP connects directly and ignores proxy environment variables.
 
 ## Submit and follow
 

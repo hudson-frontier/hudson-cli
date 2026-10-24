@@ -220,6 +220,65 @@ impl Server {
 }
 
 #[tokio::test]
+async fn authenticated_loopback_http_ignores_environment_proxies() {
+    for binary in [HUDSON, AGENT] {
+        for proxy_variable in ["http_proxy", "all_proxy"] {
+            for hostname in ["127.0.0.1", "localhost"] {
+                let destination = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+                let proxy = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+                let url = destination.url.replace("127.0.0.1", hostname);
+                let mut command = tokio::process::Command::new(binary_path(binary));
+                command.kill_on_drop(true);
+                if binary == HUDSON {
+                    command.arg("agent");
+                }
+                command.args([
+                    "--url",
+                    &url,
+                    "--api-token-env",
+                    "HUDSON_PROXY_TEST_TOKEN",
+                    "health",
+                ]);
+                for name in [
+                    "HTTP_PROXY",
+                    "HTTPS_PROXY",
+                    "ALL_PROXY",
+                    "NO_PROXY",
+                    "http_proxy",
+                    "https_proxy",
+                    "all_proxy",
+                    "no_proxy",
+                ] {
+                    command.env_remove(name);
+                }
+                command.env(proxy_variable, &proxy.url);
+                command.env("HUDSON_PROXY_TEST_TOKEN", "fixture-private-token");
+                let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(
+                    proxy.requests.lock().unwrap().is_empty(),
+                    "loopback request reached proxy"
+                );
+                let requests = destination.requests.lock().unwrap();
+                assert_eq!(requests.len(), 1);
+                assert_eq!(requests[0].path, "/health");
+                assert_eq!(
+                    requests[0].headers["authorization"],
+                    "Bearer fixture-private-token"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn help_and_versions_are_offline_for_all_entrypoints() {
     for (binary, args) in [
         (HUDSON, vec!["--help"]),
