@@ -112,6 +112,8 @@ Sessions require terminal input and output. Type a task or `/help`. Tasks are
 independent; `/open RUN_UUID` resumes observation. Request keys are printed before
 submitting tasks and replies so uncertain results can be reconciled. Use `start`
 and `follow` for scripts instead of piping input to a terminal session.
+Server-supplied display fields escape line breaks, tabs, terminal controls and
+Unicode direction controls so they stay within their labeled output line.
 
 ## Errors
 
