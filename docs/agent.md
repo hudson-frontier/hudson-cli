@@ -60,6 +60,8 @@ cat task.json | hudson agent start --input-file - --request-key structured-task-
 Request bodies are limited to 64 KiB. Values are literal JSON: a string beginning
 with `@` does not read a local file. Keep the same input and key when reconciling
 an ambiguous result instead of submitting a new logical task.
+File inputs must be regular files; symbolic links, Windows reparse points and
+special files are rejected before sending a request. Use `-` to read stdin explicitly.
 
 ## Published definitions
 
