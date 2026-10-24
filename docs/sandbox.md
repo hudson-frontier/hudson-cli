@@ -121,6 +121,9 @@ hudson sandbox stream OPERATION_ID --cursor SAVED_CURSOR --seconds 120
 Output files are bytes, not terminal text. Range results include `next_offset`,
 size, EOF and truncation metadata. Streaming emits NDJSON with base64 bytes and
 resumable cursors. Save a cursor only after processing the associated record.
+`--reconnects` bounds additional connection attempts, including transport failures
+while opening a stream. Reconnects retain the last fully emitted cursor. HTTP
+and protocol errors stop observation without retrying.
 An `end` event means output completion; still inspect or wait for the operation
 to establish command success. Gap and stream-error events return exit 9.
 
