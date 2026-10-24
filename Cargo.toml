@@ -28,6 +28,9 @@ tokio-rustls = { version = "=0.26.5", default-features = false, features = ["rin
 [lints.rust]
 unsafe_code = "forbid"
 
+[profile.release]
+strip = "symbols"
+
 [[bin]]
 name = "hudson"
 path = "src/bin/hudson.rs"
