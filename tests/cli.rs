@@ -100,11 +100,7 @@ struct Request {
 }
 type Requests = Arc<Mutex<Vec<Request>>>;
 
-async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
-    mut stream: S,
-    reply: Reply,
-    requests: Requests,
-) {
+async fn capture_request<S: AsyncRead + AsyncWrite + Unpin>(stream: &mut S, requests: Requests) {
     let mut bytes = Vec::new();
     let end = loop {
         let mut byte = [0];
@@ -140,6 +136,14 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
             serde_json::from_slice(&body).unwrap()
         },
     });
+}
+
+async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    reply: Reply,
+    requests: Requests,
+) {
+    capture_request(&mut stream, requests).await;
     let body = serde_json::to_vec(&reply.body).unwrap();
     let header = format!("HTTP/1.1 {}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n{}\r\n", reply.status, body.len(), reply.headers);
     stream.write_all(header.as_bytes()).await.unwrap();
@@ -707,8 +711,17 @@ mod sandbox_https {
         config: String,
         _dir: tempfile::TempDir,
     }
+    enum Response {
+        Json(Reply),
+        Stream(String),
+        Disconnect,
+    }
     impl Profile {
         async fn new(replies: Vec<Reply>) -> Self {
+            Self::responses(replies.into_iter().map(Response::Json).collect()).await
+        }
+
+        async fn responses(replies: Vec<Response>) -> Self {
             let _ = rustls::crypto::ring::default_provider().install_default();
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
             let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
@@ -727,10 +740,25 @@ mod sandbox_https {
             let task = tokio::spawn(async move {
                 for reply in replies {
                     let (stream, _) = listener.accept().await.unwrap();
-                    let stream = acceptor.accept(stream).await.unwrap();
+                    let mut stream = acceptor.accept(stream).await.unwrap();
                     tokio::time::timeout(
                         Duration::from_secs(10),
-                        exchange(stream, reply, captured.clone()),
+                        async {
+                            match reply {
+                                Response::Json(reply) => exchange(stream, reply, captured.clone()).await,
+                                Response::Stream(body) => {
+                                    capture_request(&mut stream, captured.clone()).await;
+                                    let header = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                                    stream.write_all(header.as_bytes()).await.unwrap();
+                                    stream.write_all(body.as_bytes()).await.unwrap();
+                                    stream.shutdown().await.unwrap();
+                                }
+                                Response::Disconnect => {
+                                    capture_request(&mut stream, captured.clone()).await;
+                                    stream.shutdown().await.unwrap();
+                                }
+                            }
+                        },
                     )
                     .await
                     .unwrap();
@@ -750,6 +778,138 @@ mod sandbox_https {
                 config: config.to_str().unwrap().to_owned(),
                 _dir: dir,
             }
+        }
+    }
+
+    fn end_frame() -> String {
+        format!(
+            "event: end\nid: final-cursor\ndata: {}\n\n",
+            json!({
+                "reason":"complete", "stdout":{"seen":1,"stored":1,"truncated":false},
+                "stderr":{"seen":0,"stored":0,"truncated":false},
+                "simulated":true,"guest_reported":true
+            })
+        )
+    }
+
+    #[tokio::test]
+    async fn stream_retries_connection_failures_without_losing_the_committed_cursor() {
+        for (binary, prefix) in [(HUDSON, vec!["sandbox"]), (SANDBOX, vec![])] {
+            for resumed in [false, true] {
+                let mut replies = Vec::new();
+                if resumed {
+                    replies.push(Response::Stream(format!(
+                        "event: output\nid: committed+/?=&\ndata: {}\n\nevent: output\nid: partial\ndata:",
+                        json!({"stream":"stdout","offset":0,"next_offset":1,"data_base64":"YQ==",
+                            "at_end":true,"complete":true,"seen":1,"stored":1,"truncated":false,
+                            "simulated":true,"guest_reported":true})
+                    )));
+                }
+                replies.extend([Response::Disconnect, Response::Stream(end_frame())]);
+                let p = Profile::responses(replies).await;
+                let mut args = prefix.clone();
+                args.extend([
+                    "--config",
+                    &p.config,
+                    "--json",
+                    "stream",
+                    "op_fixture",
+                    "--cursor",
+                    "saved+/?=&",
+                    "--reconnects",
+                    "2",
+                    "--seconds",
+                    "5",
+                ]);
+                let output = cli(binary, &args, 0).await;
+                assert!(output.stderr.is_empty());
+                let records: Vec<Value> = String::from_utf8(output.stdout)
+                    .unwrap()
+                    .lines()
+                    .map(|line| serde_json::from_str(line).unwrap())
+                    .collect();
+                assert_eq!(records.len(), if resumed { 2 } else { 1 });
+                assert_eq!(records.last().unwrap()["event"], "end");
+                if resumed {
+                    assert_eq!(records[0]["event"], "output");
+                    assert_eq!(records[0]["cursor"], "committed+/?=&");
+                }
+                let requests = p.server.requests.lock().unwrap();
+                assert_eq!(requests.len(), if resumed { 3 } else { 2 });
+                for (index, request) in requests.iter().enumerate() {
+                    assert_eq!(request.method, "GET");
+                    let url =
+                        reqwest::Url::parse(&format!("https://fixture{}", request.path)).unwrap();
+                    assert_eq!(url.path(), "/v1/operations/op_fixture/stream");
+                    let query: BTreeMap<_, _> = url.query_pairs().collect();
+                    assert_eq!(
+                        query["cursor"],
+                        if resumed && index > 0 {
+                            "committed+/?=&"
+                        } else {
+                            "saved+/?=&"
+                        }
+                    );
+                    assert_eq!(
+                        request.headers["authorization"],
+                        "Bearer fixture-private-token"
+                    );
+                    assert_eq!(request.body, Value::Null);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_connection_retries_are_bounded_and_permanent_errors_are_not_retried() {
+        for (responses, expected_code, expected_requests, kind) in [
+            (
+                vec![Response::Disconnect, Response::Disconnect],
+                7,
+                2,
+                "transport",
+            ),
+            (
+                vec![Response::Json(Reply {
+                    status: "401 Unauthorized",
+                    body: json!({}),
+                    headers: "",
+                })],
+                8,
+                1,
+                "http",
+            ),
+            (
+                vec![Response::Stream("event: output\ndata: invalid\n\n".into())],
+                1,
+                1,
+                "protocol",
+            ),
+        ] {
+            let p = Profile::responses(responses).await;
+            let output = cli(
+                HUDSON,
+                &[
+                    "sandbox",
+                    "--config",
+                    &p.config,
+                    "--json",
+                    "stream",
+                    "op_fixture",
+                    "--reconnects",
+                    "1",
+                    "--seconds",
+                    "5",
+                ],
+                expected_code,
+            )
+            .await;
+            assert!(output.stdout.is_empty());
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stderr).unwrap()["error"],
+                kind
+            );
+            assert_eq!(p.server.requests.lock().unwrap().len(), expected_requests);
         }
     }
 

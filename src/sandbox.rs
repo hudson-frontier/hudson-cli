@@ -517,13 +517,21 @@ async fn stream(
     reconnects: u8,
 ) -> Result<u8, Error> {
     for attempt in 0..=reconnects {
-        let mut events = client
+        let mut events = match client
             .stream_output(StreamOutput {
                 operation_id,
                 cursor: cursor.as_deref(),
                 last_event_id: None,
             })
-            .await?;
+            .await
+        {
+            Ok(events) => events,
+            Err(Error::Transport) if attempt < reconnects => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         loop {
             match events.next().await {
                 Ok(Some(event)) => {
