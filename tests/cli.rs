@@ -279,6 +279,71 @@ async fn authenticated_loopback_http_ignores_environment_proxies() {
 }
 
 #[tokio::test]
+async fn agent_json_files_reject_symlinks_before_any_request() {
+    let directory = tempfile::tempdir().unwrap();
+    let protected = directory.path().join("protected.json");
+    std::fs::write(
+        &protected,
+        br#"{"operator_secret":"json-file-fixture-secret"}"#,
+    )
+    .unwrap();
+    let link = directory.path().join("input.json");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&protected, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&protected, &link).unwrap();
+    let path = link.to_str().unwrap();
+    for binary in [HUDSON, AGENT] {
+        for command in [
+            vec!["publish-tool", path],
+            vec!["publish-agent", path],
+            vec![
+                "start",
+                "--input-file",
+                path,
+                "--request-key",
+                "json-file-test-key",
+            ],
+        ] {
+            let server = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+            let mut args = vec!["--url", &server.url];
+            args.extend(command);
+            let output = cli(binary, &args, 1).await;
+            assert!(output.stdout.is_empty());
+            assert!(server.requests.lock().unwrap().is_empty());
+            assert!(!String::from_utf8_lossy(&output.stderr).contains("json-file-fixture-secret"));
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn agent_json_files_reject_fifos_without_waiting_for_a_writer() {
+    let directory = tempfile::tempdir().unwrap();
+    let fifo = directory.path().join("input.json");
+    assert!(std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .unwrap()
+        .success());
+    for binary in [HUDSON, AGENT] {
+        let server = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+        let output = tokio::time::timeout(
+            Duration::from_secs(3),
+            cli(
+                binary,
+                &["--url", &server.url, "publish-tool", fifo.to_str().unwrap()],
+                1,
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(output.stdout.is_empty());
+        assert!(server.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn help_and_versions_are_offline_for_all_entrypoints() {
     for (binary, args) in [
         (HUDSON, vec!["--help"]),
