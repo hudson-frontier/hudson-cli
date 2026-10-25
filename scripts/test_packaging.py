@@ -2,12 +2,15 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import struct
 import tarfile
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import zipfile
 
 import package
@@ -114,6 +117,46 @@ class PackagingTests(unittest.TestCase):
         struct.pack_into('<H', binary, 18, 183)
         with self.assertRaises(ValueError):
             package.binary_header(bytes(binary), 'x86_64-unknown-linux-gnu')
+
+    def test_build_checksum_never_replaces_an_existing_file_or_link(self):
+        for target in ('x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc'):
+            archive = self.fixture(target)
+            destination = self.root / ('binaries-' + target)
+            package.verify(archive, destination=destination)
+            binary_dir = destination / package.archive_stem('0.1.0', target) / 'bin'
+            archive.unlink()
+            for kind in ('new', 'file', 'symlink', 'hardlink'):
+                with self.subTest(target=target, kind=kind):
+                    output = self.root / (target + '-' + kind)
+                    output.mkdir()
+                    checksum = output / (package.archive_name('0.1.0', target) + '.sha256')
+                    victim = self.root / (target + '-private-' + kind) if kind in ('symlink', 'hardlink') else checksum
+                    if kind != 'new':
+                        victim.write_bytes(b'private fixture: preserve these bytes')
+                        if kind == 'symlink':
+                            checksum.symlink_to(victim)
+                        elif kind == 'hardlink':
+                            os.link(victim, checksum)
+                    def git(*args):
+                        return '' if args[0] == 'status' else '1700000000' if args[0] == 'show' else 'a' * 40
+                    def command(*args, **kwargs):
+                        return SimpleNamespace(stdout='hudson 0.1.0\n' if kwargs.get('text') else b'# fixture completion\n', stderr=b'')
+                    rejected = False
+                    with patch.object(package, 'git', side_effect=git), \
+                            patch.object(package, 'dependency_notices', return_value=b'fixture license\n'), \
+                            patch.object(package.subprocess, 'run', side_effect=command):
+                        try:
+                            result = package.build(target, binary_dir, output)
+                        except FileExistsError:
+                            rejected = True
+                    if kind == 'new':
+                        self.assertFalse(rejected)
+                        self.assertEqual(checksum.read_text(), f'{package.digest(result.read_bytes())}  {result.name}\n')
+                    else:
+                        self.assertEqual(victim.read_bytes(), b'private fixture: preserve these bytes')
+                        self.assertTrue(rejected)
+                        self.assertEqual(checksum.is_symlink(), kind == 'symlink')
+                    self.assertFalse(list(output.glob('.hudson-checksum-*')))
 
 
 if __name__ == '__main__':

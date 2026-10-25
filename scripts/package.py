@@ -40,6 +40,24 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def publish_checksum(path: Path, text: str) -> None:
+    """Publish complete checksum bytes without replacing any existing entry."""
+    descriptor, name = tempfile.mkstemp(prefix='.hudson-checksum-', dir=path.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        if os.name == 'nt':
+            # Windows rename refuses an existing destination; POSIX rename replaces it.
+            os.rename(temporary, path)
+        else:
+            os.link(temporary, path, follow_symlinks=False)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def version() -> str:
     value = tomllib.loads((ROOT / 'Cargo.toml').read_text())['package']['version']
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', value):
@@ -314,8 +332,8 @@ def build(target: str, binary_dir: Path, output: Path, allow_dirty: bool = False
                         entry.size, entry.mode, entry.mtime = len(data), mode, epoch
                         bundle.addfile(entry, io.BytesIO(data))
     verify(archive, commit)
-    archive.with_name(archive.name + '.sha256').write_text(
-        f'{digest(archive.read_bytes())}  {archive.name}\n', encoding='utf-8', newline='\n')
+    publish_checksum(archive.with_name(archive.name + '.sha256'),
+                     f'{digest(archive.read_bytes())}  {archive.name}\n')
     return archive
 
 

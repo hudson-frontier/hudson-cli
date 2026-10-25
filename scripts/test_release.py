@@ -1,11 +1,14 @@
 """Verify release gates with synthetic GitHub responses; no publication occurs."""
 import copy
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
 import package
 import release
+import test_packaging
 
 
 class ReleaseGateTests(unittest.TestCase):
@@ -38,6 +41,41 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertEqual(release.verify_run('123'),
                          {'commit': self.commit, 'version': '0.1.0', 'tag': 'v0.1.0'})
         self.assertTrue(all(len(call.args) == 1 for call in self.api.call_args_list))
+
+    def test_compose_checksum_never_replaces_an_existing_file_or_link(self):
+        for kind in ('new', 'file', 'symlink', 'hardlink'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                directory = root / 'release'
+                directory.mkdir()
+                fixture = test_packaging.PackagingTests()
+                fixture.root = directory
+                archive = fixture.fixture()
+                archive.with_name(archive.name + '.sha256').write_text(
+                    f'{package.digest(archive.read_bytes())}  {archive.name}\n')
+                summary = directory / 'SHA256SUMS'
+                victim = root / 'private' if kind in ('symlink', 'hardlink') else summary
+                if kind != 'new':
+                    victim.write_bytes(b'private fixture: preserve these bytes')
+                    if kind == 'symlink':
+                        summary.symlink_to(victim)
+                    elif kind == 'hardlink':
+                        os.link(victim, summary)
+                rejected = False
+                with patch.object(package, 'TARGETS', {'x86_64-unknown-linux-gnu': ('linux', 'x86_64')}):
+                    try:
+                        result = release.compose(directory, self.commit, '0.1.0', create_summary=True)
+                    except FileExistsError:
+                        rejected = True
+                    if kind == 'new':
+                        self.assertFalse(rejected)
+                        self.assertEqual(release.compose(directory, self.commit, '0.1.0'), result)
+                        self.assertEqual(summary.read_text(), f'{package.digest(archive.read_bytes())}  {archive.name}\n')
+                    else:
+                        self.assertEqual(victim.read_bytes(), b'private fixture: preserve these bytes')
+                        self.assertTrue(rejected)
+                        self.assertEqual(summary.is_symlink(), kind == 'symlink')
+                self.assertFalse(list(directory.glob('.hudson-checksum-*')))
 
     def test_foreign_unfinished_or_different_source_runs_fail(self):
         baseline = copy.deepcopy(self.run)
