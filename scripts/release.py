@@ -99,7 +99,7 @@ def compose(directory: Path, commit: str, release_version: str, create_summary=F
     summary = ''.join(f'{checksums[name]}  {name}\n' for name in sorted(checksums))
     summary_path = directory / 'SHA256SUMS'
     if create_summary:
-        summary_path.write_text(summary, encoding='utf-8', newline='\n')
+        package.publish_checksum(summary_path, summary)
     elif summary_path.is_symlink() or summary_path.read_text(encoding='utf-8') != summary:
         raise ValueError('Release checksum manifest does not match')
     return {path.name: package.digest(path.read_bytes()) for path in directory.iterdir()}

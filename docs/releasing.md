@@ -33,6 +33,9 @@ archive and verifies a fresh installation. `--allow-dirty` is available only for
 local development; its manifest records that fact, and publication rejects it.
 Use a new output directory or remove only your own prior build artifacts before
 rebuilding an archive with the same filename.
+Checksum files also require a new destination: existing files and links are
+refused. Their complete contents are staged before atomic publication. Use a
+fresh private directory when repeating release composition.
 
 To regenerate help after changing command definitions:
 
@@ -72,7 +75,7 @@ The workflow:
 1. Requires a successful main push run with every native validation and policy
    job successful, and verifies that the source is still current main.
 2. Downloads all five tested archives, validates their manifests and checksums,
-   and creates the aggregate `SHA256SUMS` file with read-only permissions.
+   and atomically publishes a new aggregate `SHA256SUMS` file.
 3. Creates or resumes only a matching draft and uploads the qualified files.
    Existing published releases and conflicting tags are never overwritten.
 4. Downloads the uploaded draft files in a separate verification job and compares
