@@ -226,6 +226,7 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
                     page_size: 100,
                     poll_ms: 500,
                     max_retries: 3,
+                    report_retries: true,
                 },
                 true,
                 |record| {
@@ -237,7 +238,7 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
                 },
             );
             if let Err(reason) = result {
-                eprintln!("{}; /follow retries observation", safe(&reason));
+                eprintln!("{}; /follow retries observation", safe(&reason.to_string()));
             }
         }
     }
