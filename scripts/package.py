@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import gzip
 import hashlib
 import io
@@ -34,6 +35,62 @@ REQUIRED_DOCS = ('install.md', 'agent.md', 'sandbox.md', 'automation.md',
                  'troubleshooting.md', 'reference.md', 'releasing.md', 'homebrew.md')
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
+MAX_METADATA_BYTES = 1024 * 1024
+MAX_MANIFEST_BYTES = 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 256
+
+
+class ArchiveReader:
+    """Bound metadata reads and TAR positions before container parsers use them."""
+
+    def __init__(self, source, max_position=None):
+        self.source = source
+        self.remaining = MAX_METADATA_BYTES
+        self.max_position = max_position
+
+    def read(self, size=-1):
+        limits = []
+        if self.remaining is not None:
+            limits.append(self.remaining)
+        if self.max_position is not None:
+            limits.append(self.max_position - self.tell())
+        limit = min(limits) if limits else None
+        if limit is not None:
+            if size < 0:
+                size = limit + 1
+            elif size > limit:
+                raise ValueError('Archive metadata or expansion budget exceeded')
+        data = self.source.read(size)
+        if limit is not None and len(data) > limit:
+            raise ValueError('Archive metadata or expansion budget exceeded')
+        if self.remaining is not None:
+            self.remaining -= len(data)
+        return data
+
+    def tell(self):
+        return self.source.tell()
+
+    def seek(self, offset, whence=0):
+        if self.max_position is None:
+            return self.source.seek(offset, whence)
+        if whence not in (0, 1):
+            raise ValueError('Unsupported archive seek')
+        position = offset + (self.tell() if whence == 1 else 0)
+        if not 0 <= position <= self.max_position:
+            raise ValueError('Archive expansion budget exceeded')
+        return self.source.seek(position)
+
+    def seekable(self):
+        return self.source.seekable()
+
+    @contextmanager
+    def payload(self):
+        remaining = self.remaining
+        self.remaining = None
+        try:
+            yield
+        finally:
+            self.remaining = remaining
 
 
 def digest(data: bytes) -> str:
@@ -132,28 +189,58 @@ def read_archive(archive: Path) -> dict[str, tuple[bytes, int]]:
         entries[name] = (data, mode)
 
     if archive.name.endswith('.zip'):
-        with zipfile.ZipFile(archive) as source:
-            for entry in source.infolist():
-                safe_name(entry.orig_filename.rstrip('/'))
-                if entry.is_dir():
-                    safe_name(entry.filename.rstrip('/'))
-                    continue
-                mode = entry.external_attr >> 16
-                if stat.S_ISLNK(mode) or entry.file_size > MAX_EXPANDED_BYTES - total:
-                    raise ValueError('Unsupported archive member')
-                add(entry.filename, source.read(entry), stat.S_IMODE(mode))
+        with archive.open('rb') as raw:
+            reader = ArchiveReader(raw)
+            with zipfile.ZipFile(reader) as source:
+                if len(source.infolist()) > MAX_ARCHIVE_MEMBERS:
+                    raise ValueError('Archive has too many members')
+                for entry in source.infolist():
+                    safe_name(entry.orig_filename.rstrip('/'))
+                    if entry.is_dir():
+                        safe_name(entry.filename.rstrip('/'))
+                        continue
+                    mode = entry.external_attr >> 16
+                    limit = MAX_EXPANDED_BYTES - total
+                    if entry.filename.endswith('/manifest.json'):
+                        limit = min(limit, MAX_MANIFEST_BYTES)
+                    if (stat.S_ISLNK(mode) or entry.file_size > limit
+                            or entry.compress_size > MAX_ARCHIVE_BYTES
+                            or entry.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
+                        raise ValueError('Unsupported archive member')
+                    with source.open(entry) as member:
+                        with reader.payload():
+                            data = member.read(entry.file_size + 1)
+                    if len(data) != entry.file_size:
+                        raise ValueError('Archive member size does not match')
+                    add(entry.filename, data, stat.S_IMODE(mode))
     elif archive.name.endswith('.tar.gz'):
-        with tarfile.open(archive, 'r:gz') as source:
-            for entry in source:
-                if entry.isdir():
-                    safe_name(entry.name.rstrip('/'))
-                    continue
-                if not entry.isfile() or entry.size > MAX_EXPANDED_BYTES - total:
-                    raise ValueError('Unsupported archive member')
-                stream = source.extractfile(entry)
-                if stream is None:
-                    raise ValueError('Missing archive member')
-                add(entry.name, stream.read(), entry.mode)
+        try:
+            with gzip.open(archive, 'rb') as raw:
+                reader = ArchiveReader(raw, MAX_EXPANDED_BYTES + MAX_METADATA_BYTES
+                                       + MAX_ARCHIVE_MEMBERS * tarfile.BLOCKSIZE)
+                with tarfile.open(fileobj=reader, mode='r:') as source:
+                    for number, entry in enumerate(source, 1):
+                        if number > MAX_ARCHIVE_MEMBERS:
+                            raise ValueError('Archive has too many members')
+                        if entry.size < 0:
+                            raise ValueError('Unsupported archive member')
+                        if entry.isdir():
+                            if entry.size:
+                                raise ValueError('Unsupported directory body')
+                            safe_name(entry.name.rstrip('/'))
+                            continue
+                        limit = MAX_EXPANDED_BYTES - total
+                        if entry.name.endswith('/manifest.json'):
+                            limit = min(limit, MAX_MANIFEST_BYTES)
+                        if not entry.isfile() or entry.size > limit:
+                            raise ValueError('Unsupported archive member')
+                        stream = source.extractfile(entry)
+                        if stream is None:
+                            raise ValueError('Missing archive member')
+                        with reader.payload(), stream:
+                            add(entry.name, stream.read(entry.size + 1), entry.mode)
+        except RecursionError as error:
+            raise ValueError('Archive metadata nesting is too deep') from error
     else:
         raise ValueError('Unsupported archive format')
     return entries
@@ -168,7 +255,7 @@ def verify(archive: Path, expected_commit: str | None = None,
     manifest_bytes = entries[manifest_paths[0]][0]
     if entries[manifest_paths[0]][1] != 0o644:
         raise ValueError('Manifest has an unexpected mode')
-    if len(manifest_bytes) > 1024 * 1024:
+    if len(manifest_bytes) > MAX_MANIFEST_BYTES:
         raise ValueError('Manifest is too large')
     manifest = json.loads(manifest_bytes)
     if manifest.get('schema') != 1 or manifest.get('target') not in TARGETS:

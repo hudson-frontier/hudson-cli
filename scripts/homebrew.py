@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import io
 import json
@@ -48,36 +49,46 @@ def archive_tree(data: bytes, *, prefixed: bool) -> dict[str, tuple[str, bool]]:
     root = None
     total = 0
     count = 0
-    with tarfile.open(fileobj=io.BytesIO(data), mode='r:*') as archive:
-        for member in archive:
-            count += 1
-            if count > MAX_FILES:
-                raise ValueError('Source archive exceeds its file limit')
-            path = package.safe_name(member.name.rstrip('/'))
-            if prefixed:
-                if root is None:
-                    root = path.parts[0]
-                if path.parts[0] != root:
-                    raise ValueError('Source archive has multiple roots')
-                if len(path.parts) == 1:
-                    if not member.isdir():
-                        raise ValueError('Invalid source archive root')
-                    continue
-                name = '/'.join(path.parts[1:])
-            else:
-                name = str(path)
-            if member.isdir():
-                continue
-            if not member.isfile() or member.size > MAX_SOURCE - total or name in files:
-                raise ValueError('Invalid source archive member')
-            stream = archive.extractfile(member)
-            if stream is None:
-                raise ValueError('Missing source archive member')
-            content = stream.read(MAX_SOURCE - total + 1)
-            total += len(content)
-            if len(content) != member.size or total > MAX_SOURCE:
-                raise ValueError('Source archive content exceeds its byte limit')
-            files[name] = (hashlib.sha256(content).hexdigest(), bool(member.mode & 0o111))
+    try:
+        with io.BytesIO(data) as raw:
+            with (gzip.GzipFile(fileobj=raw) if data.startswith(b'\x1f\x8b') else raw) as decoded:
+                reader = package.ArchiveReader(decoded, MAX_SOURCE + package.MAX_METADATA_BYTES
+                                               + MAX_FILES * tarfile.BLOCKSIZE)
+                with tarfile.open(fileobj=reader, mode='r:') as archive:
+                    for member in archive:
+                        count += 1
+                        if count > MAX_FILES:
+                            raise ValueError('Source archive exceeds its file limit')
+                        if member.size < 0 or member.isdir() and member.size:
+                            raise ValueError('Invalid source archive member')
+                        path = package.safe_name(member.name.rstrip('/'))
+                        if prefixed:
+                            if root is None:
+                                root = path.parts[0]
+                            if path.parts[0] != root:
+                                raise ValueError('Source archive has multiple roots')
+                            if len(path.parts) == 1:
+                                if not member.isdir():
+                                    raise ValueError('Invalid source archive root')
+                                continue
+                            name = '/'.join(path.parts[1:])
+                        else:
+                            name = str(path)
+                        if member.isdir():
+                            continue
+                        if not member.isfile() or member.size > MAX_SOURCE - total or name in files:
+                            raise ValueError('Invalid source archive member')
+                        stream = archive.extractfile(member)
+                        if stream is None:
+                            raise ValueError('Missing source archive member')
+                        with reader.payload(), stream:
+                            content = stream.read(member.size + 1)
+                        total += len(content)
+                        if len(content) != member.size or total > MAX_SOURCE:
+                            raise ValueError('Source archive content exceeds its byte limit')
+                        files[name] = (hashlib.sha256(content).hexdigest(), bool(member.mode & 0o111))
+    except RecursionError as error:
+        raise ValueError('Source archive metadata nesting is too deep') from error
     if not files:
         raise ValueError('Source archive is empty')
     return files

@@ -1,4 +1,6 @@
 """Exercise archive integrity and installation boundaries with synthetic files."""
+import binascii
+import gzip
 import hashlib
 import io
 import json
@@ -159,6 +161,139 @@ class PackagingTests(unittest.TestCase):
         struct.pack_into('<H', binary, 18, 183)
         with self.assertRaises(ValueError):
             package.binary_header(bytes(binary), 'x86_64-unknown-linux-gnu')
+
+    def test_archive_metadata_is_bounded_before_parsing(self):
+        zipped = self.root / 'metadata.zip'
+        entry = zipfile.ZipInfo('guide.md')
+        entry.extra = struct.pack('<HH', 0xffff, 2048) + b'x' * 2048
+        with zipfile.ZipFile(zipped, 'w') as output:
+            output.writestr(entry, b'fixture')
+        tarred = self.root / 'metadata.tar.gz'
+        with tarfile.open(tarred, 'w:gz', format=tarfile.PAX_FORMAT) as output:
+            entry = tarfile.TarInfo('guide.md')
+            entry.size = 7
+            entry.pax_headers = {'comment': 'x' * 2048}
+            output.addfile(entry, io.BytesIO(b'fixture'))
+        for archive in (zipped, tarred):
+            with self.subTest(archive=archive.name), \
+                    patch.object(package, 'MAX_METADATA_BYTES', 1024, create=True):
+                with self.assertRaises(ValueError):
+                    package.read_archive(archive)
+
+    def test_oversized_manifests_are_rejected_before_payload_reads(self):
+        content = b'{}' + b' ' * 1024
+        zipped = self.root / 'manifest.zip'
+        with zipfile.ZipFile(zipped, 'w') as output:
+            output.writestr('root/manifest.json', content)
+        tarred = self.root / 'manifest.tar.gz'
+        with tarfile.open(tarred, 'w:gz') as output:
+            entry = tarfile.TarInfo('root/manifest.json')
+            entry.size = len(content)
+            output.addfile(entry, io.BytesIO(content))
+        for archive, stream_type in ((zipped, zipfile.ZipExtFile), (tarred, tarfile.ExFileObject)):
+            with self.subTest(archive=archive.name), \
+                    patch.object(package, 'MAX_MANIFEST_BYTES', 8, create=True), \
+                    patch.object(stream_type, 'read', side_effect=AssertionError('oversized manifest read')):
+                with self.assertRaises(ValueError):
+                    package.read_archive(archive)
+
+    def test_forged_tar_extension_size_never_reaches_the_decompressor(self):
+        archive = self.root / 'forged-extension.tar.gz'
+        extension = tarfile.TarInfo('pax')
+        extension.type = tarfile.XHDTYPE
+        extension.size = 1024 * 1024 * 1024
+        with gzip.open(archive, 'wb') as output:
+            output.write(extension.tobuf(format=tarfile.USTAR_FORMAT) + bytes(1024))
+        read = gzip.GzipFile.read
+
+        def bounded_read(stream, size=-1):
+            self.assertGreaterEqual(size, 0, 'unbounded gzip metadata read')
+            self.assertLessEqual(size, package.MAX_METADATA_BYTES,
+                                 'oversized extension reached the decompressor')
+            return read(stream, size)
+
+        with patch.object(gzip.GzipFile, 'read', bounded_read), self.assertRaises(ValueError):
+            package.read_archive(archive)
+
+    def test_zip_local_extra_fields_can_differ_from_directory_metadata(self):
+        archive = self.root / 'local-extra.zip'
+        with zipfile.ZipFile(archive, 'w') as output:
+            output.writestr('guide.md', b'fixture')
+        data = bytearray(archive.read_bytes())
+        directory = data.rindex(b'PK\x01\x02')
+        end = data.rindex(b'PK\x05\x06')
+        extra = struct.pack('<HH', 0xffff, 1024) + b'x' * 1024
+        struct.pack_into('<H', data, 28, len(extra))
+        struct.pack_into('<I', data, end + 16, directory + len(extra))
+        name_length = struct.unpack_from('<H', data, 26)[0]
+        data[30 + name_length:30 + name_length] = extra
+        archive.write_bytes(data)
+        self.assertEqual(package.read_archive(archive)['guide.md'][0], b'fixture')
+
+    def test_ignored_directories_count_toward_the_archive_member_limit(self):
+        for suffix in ('.zip', '.tar.gz'):
+            for count in (2, 3):
+                archive = self.root / ('directories' + suffix)
+                if suffix == '.zip':
+                    with zipfile.ZipFile(archive, 'w') as output:
+                        for number in range(count):
+                            output.writestr(f'directory-{number}/', b'')
+                else:
+                    with tarfile.open(archive, 'w:gz') as output:
+                        for number in range(count):
+                            entry = tarfile.TarInfo(f'directory-{number}')
+                            entry.type = tarfile.DIRTYPE
+                            output.addfile(entry)
+                with self.subTest(suffix=suffix, count=count), \
+                        patch.object(package, 'MAX_ARCHIVE_MEMBERS', 2, create=True):
+                    if count == 2:
+                        self.assertEqual(package.read_archive(archive), {})
+                    else:
+                        with self.assertRaises(ValueError):
+                            package.read_archive(archive)
+
+    def test_unsupported_zip_codecs_are_rejected(self):
+        for codec in (zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA):
+            archive = self.root / 'codec.zip'
+            with zipfile.ZipFile(archive, 'w', compression=codec) as output:
+                output.writestr('guide.md', b'fixture')
+            with self.subTest(codec=codec), self.assertRaises(ValueError):
+                package.read_archive(archive)
+
+    def test_zip_payload_reads_are_bounded_when_the_size_is_forged(self):
+        archive = self.root / 'forged-size.zip'
+        with zipfile.ZipFile(archive, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+            output.writestr('guide.md', b'x' * 65536)
+        data = bytearray(archive.read_bytes())
+        directory = data.rindex(b'PK\x01\x02')
+        for crc_offset, size_offset in ((14, 22), (directory + 16, directory + 24)):
+            struct.pack_into('<I', data, crc_offset, binascii.crc32(b'x'))
+            struct.pack_into('<I', data, size_offset, 1)
+        archive.write_bytes(data)
+        read = zipfile.ZipExtFile.read
+
+        def bounded_read(stream, size=-1):
+            self.assertGreater(size, 0, 'unbounded ZIP decompression request')
+            self.assertLessEqual(size, 2, 'ZIP read exceeds the advertised size plus one')
+            return read(stream, size)
+
+        with patch.object(zipfile.ZipExtFile, 'read', bounded_read):
+            self.assertEqual(package.read_archive(archive)['guide.md'][0], b'x')
+
+    def test_normal_zip_comments_and_pax_paths_still_parse(self):
+        zipped = self.root / 'normal.zip'
+        with zipfile.ZipFile(zipped, 'w', compression=zipfile.ZIP_DEFLATED) as output:
+            output.comment = b'archive comment'
+            output.writestr('guide.md', b'fixture')
+        self.assertEqual(package.read_archive(zipped)['guide.md'][0], b'fixture')
+        tarred = self.root / 'normal.tar.gz'
+        name = 'docs/' + 'long-path-' * 20 + 'guide.md'
+        with tarfile.open(tarred, 'w:gz', format=tarfile.PAX_FORMAT) as output:
+            entry = tarfile.TarInfo(name)
+            entry.size = 7
+            entry.pax_headers = {'comment': 'archive comment'}
+            output.addfile(entry, io.BytesIO(b'fixture'))
+        self.assertEqual(package.read_archive(tarred)[name][0], b'fixture')
 
     def test_build_checksum_never_replaces_an_existing_file_or_link(self):
         for target in ('x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc'):
