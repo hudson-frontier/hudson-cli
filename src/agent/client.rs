@@ -24,6 +24,17 @@ impl std::fmt::Display for ProtocolFailure {
 
 impl std::error::Error for ProtocolFailure {}
 
+#[derive(Debug)]
+pub(crate) struct TransportFailure(pub &'static str);
+
+impl std::fmt::Display for TransportFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+impl std::error::Error for TransportFailure {}
+
 const MAX_RESPONSE_BYTES: u64 = 8 * 1024 * 1024;
 
 fn read_response(
@@ -107,9 +118,9 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                     page_size,
                     poll_ms,
                     max_retries,
+                    report_retries: !args.json,
                 },
-            )
-            .map_err(Into::into);
+            );
         }
         Command::Health => client.get(format!("{base}/health")).send()?,
         Command::Capabilities => client.get(format!("{base}/capabilities")).send()?,

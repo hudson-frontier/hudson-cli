@@ -1,41 +1,75 @@
 //! Cursor-based observation only: following never resumes, approves, or cancels a run.
+use super::client::{HttpFailure, ProtocolFailure, TransportFailure};
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
 use std::{io::Write, time::Duration};
+
+type Error = Box<dyn std::error::Error>;
+
+#[derive(Debug)]
+struct ObservationFailure {
+    source: Error,
+    after: u64,
+}
+
+impl std::fmt::Display for ObservationFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{}; reconnect with --after {}",
+            self.source, self.after
+        )
+    }
+}
+
+impl std::error::Error for ObservationFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
 
 pub struct Options {
     pub after: u64,
     pub page_size: u64,
     pub poll_ms: u64,
     pub max_retries: u32,
+    pub report_retries: bool,
 }
 
 enum FetchError {
-    Retryable,
-    Fatal(String),
+    Retryable(Error),
+    Fatal(Error),
 }
 
 fn fetch(client: &Client, url: &str) -> Result<Value, FetchError> {
     use std::io::Read;
-    let response = client.get(url).send().map_err(|_| FetchError::Retryable)?;
+    let response = client.get(url).send().map_err(|_| {
+        FetchError::Retryable(TransportFailure("follow request unavailable").into())
+    })?;
     let status = response.status();
     if status.is_server_error() || status.as_u16() == 429 {
-        return Err(FetchError::Retryable);
+        return Err(FetchError::Retryable(HttpFailure(status).into()));
     }
     if !status.is_success() {
         // Do not print an error body or URL that could echo authentication data.
-        return Err(FetchError::Fatal(format!("Hudson returned {status}")));
+        return Err(FetchError::Fatal(HttpFailure(status).into()));
     }
     let mut bytes = Vec::new();
     response
         .take(8 * 1024 * 1024 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| FetchError::Retryable)?;
+        .map_err(|_| {
+            FetchError::Retryable(
+                TransportFailure("follow response could not be read completely").into(),
+            )
+        })?;
     if bytes.len() > 8 * 1024 * 1024 {
-        return Err(FetchError::Fatal("follow response exceeds 8 MiB".into()));
+        return Err(FetchError::Fatal(
+            ProtocolFailure("follow response exceeds 8 MiB").into(),
+        ));
     }
     serde_json::from_slice(&bytes)
-        .map_err(|_| FetchError::Fatal("invalid JSON in follow response".into()))
+        .map_err(|_| FetchError::Fatal(ProtocolFailure("invalid JSON in follow response").into()))
 }
 
 fn fetch_with_retry(
@@ -43,26 +77,28 @@ fn fetch_with_retry(
     url: &str,
     options: &Options,
     after: u64,
-) -> Result<Value, String> {
+) -> Result<Value, Error> {
     for attempt in 0..=options.max_retries {
         match fetch(client, url) {
             Ok(value) => return Ok(value),
             Err(FetchError::Fatal(reason)) => return Err(reason),
-            Err(FetchError::Retryable) if attempt < options.max_retries => {
+            Err(FetchError::Retryable(_)) if attempt < options.max_retries => {
                 let delay = options.poll_ms.saturating_mul(1_u64 << attempt).min(30_000);
-                eprintln!("follow: retrying unavailable server in {delay} ms; after={after}");
+                if options.report_retries {
+                    eprintln!("follow: retrying unavailable server in {delay} ms; after={after}");
+                }
                 std::thread::sleep(Duration::from_millis(delay));
             }
-            Err(FetchError::Retryable) => return Err("follow retry limit reached".into()),
+            Err(FetchError::Retryable(error)) => return Err(error),
         }
     }
     unreachable!("bounded retry loop always returns")
 }
 
-fn page(value: Value, after: u64, limit: u64, run_id: &str) -> Result<Vec<Value>, String> {
+fn page(value: Value, after: u64, limit: u64, run_id: &str) -> Result<Vec<Value>, &'static str> {
     let events = value.as_array().ok_or("event page must be an array")?;
     if events.len() as u64 > limit {
-        return Err("event page exceeds requested limit".into());
+        return Err("event page exceeds requested limit");
     }
     let mut previous = after;
     for event in events {
@@ -70,7 +106,7 @@ fn page(value: Value, after: u64, limit: u64, run_id: &str) -> Result<Vec<Value>
             .as_u64()
             .ok_or("event sequence must be an unsigned integer")?;
         if sequence <= previous || event["run_id"].as_str() != Some(run_id) {
-            return Err("event page has invalid ordering or run identity".into());
+            return Err("event page has invalid ordering or run identity");
         }
         previous = sequence;
     }
@@ -85,7 +121,7 @@ fn emit(output: &mut impl Write, record: Value) -> Result<(), String> {
         .map_err(|_| "cannot flush follow output".into())
 }
 
-pub fn run(client: &Client, base: &str, run_id: &str, options: Options) -> Result<(), String> {
+pub fn run(client: &Client, base: &str, run_id: &str, options: Options) -> Result<(), Error> {
     let mut output = std::io::stdout().lock();
     observe(client, base, run_id, options, false, |record| {
         emit(&mut output, record)
@@ -101,10 +137,10 @@ pub fn observe(
     options: Options,
     stop_on_wait: bool,
     mut output: impl FnMut(Value) -> Result<(), String>,
-) -> Result<u64, String> {
+) -> Result<u64, Error> {
     let mut after = options.after;
     let mut previous_run = Value::Null;
-    let result = (|| {
+    let result = (|| -> Result<u64, Error> {
         loop {
             // Observe status BEFORE draining: terminal status guarantees its
             // committed final events exist before the following event requests.
@@ -113,9 +149,11 @@ pub fn observe(
                 .as_str()
                 .is_none_or(|id| !id.eq_ignore_ascii_case(run_id))
             {
-                return Err("run response has invalid identity".into());
+                return Err(ProtocolFailure("run response has invalid identity").into());
             }
-            let status = run["status"].as_str().ok_or("run status is missing")?;
+            let status = run["status"]
+                .as_str()
+                .ok_or(ProtocolFailure("run status is missing"))?;
             if !matches!(
                 status,
                 "queued"
@@ -126,7 +164,7 @@ pub fn observe(
                     | "failed"
                     | "cancelled"
             ) {
-                return Err("unknown run status".into());
+                return Err(ProtocolFailure("unknown run status").into());
             }
             loop {
                 let value = fetch_with_retry(
@@ -138,7 +176,8 @@ pub fn observe(
                     &options,
                     after,
                 )?;
-                let events = page(value, after, options.page_size, run_id)?;
+                let events =
+                    page(value, after, options.page_size, run_id).map_err(ProtocolFailure)?;
                 if events.is_empty() {
                     break;
                 }
@@ -155,12 +194,12 @@ pub fn observe(
             match status {
                 "completed" => return Ok(after),
                 "waiting" if stop_on_wait => return Ok(after),
-                "failed" | "cancelled" => return Err(format!("run {status}")),
+                "failed" | "cancelled" => return Err(format!("run {status}").into()),
                 _ => std::thread::sleep(Duration::from_millis(options.poll_ms)),
             }
         }
     })();
-    result.map_err(|reason: String| format!("{reason}; reconnect with --after {after}"))
+    result.map_err(|source| -> Error { Box::new(ObservationFailure { source, after }) })
 }
 
 #[cfg(test)]
