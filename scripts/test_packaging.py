@@ -22,7 +22,7 @@ class PackagingTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
-    def fixture(self, target='x86_64-unknown-linux-gnu', extra=None, corrupt=False):
+    def fixture(self, target='x86_64-unknown-linux-gnu', extra=None, corrupt=False, additional_files=None):
         prefix = package.archive_stem('0.1.0', target)
         windows = target.endswith('windows-msvc')
         binary = bytearray(128)
@@ -40,6 +40,7 @@ class PackagingTests(unittest.TestCase):
         names += [f'docs/{name}' for name in package.REQUIRED_DOCS]
         names += [f'completions/{name}' for name in package.SHELL_FILES.values()]
         files.update({name: (b'release fixture\n', 0o644) for name in names})
+        files.update(additional_files or {})
         manifest = {'schema': 1, 'version': '0.1.0', 'commit': 'a' * 40,
                     'dirty': False, 'target': target,
                     'files': {name: {'sha256': hashlib.sha256(data).hexdigest(),
@@ -89,6 +90,47 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             package.verify(archive, destination=destination)
         self.assertFalse(destination.exists())
+
+    def test_unsafe_paths_are_rejected_before_installation(self):
+        for target in ('x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc'):
+            for name in ('COM\u00b9.md', 'com\u00b2.notes.md', 'LPT\u00b3.md',
+                         'NUL .md', 'CONIN$.md', 'CONOUT$/guide.md',
+                         'guide\x1b.md', 'guide\u202e.md'):
+                with self.subTest(target=target, name=name):
+                    archive = self.fixture(target, additional_files={f'docs/{name}': (b'fixture\n', 0o644)})
+                    destination = self.root / 'install'
+                    with self.assertRaises(ValueError):
+                        package.verify(archive)
+                    with self.assertRaises(ValueError):
+                        package.verify(archive, destination=destination)
+                    self.assertFalse(destination.exists())
+                    archive.unlink()
+
+    def test_nonportable_archive_components_are_rejected(self):
+        for name in ('docs/guide?.md', 'docs/guide*.md', 'docs/a|b.md',
+                     'docs/a<b.md', 'docs/a>b.md', 'docs/a"b.md',
+                     'docs/guide\x1b.md', 'docs/guide\n.md', 'docs/guide\x85.md',
+                     'docs/guide\u202e.md', 'docs/guide\u2028.md'):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                package.safe_name(name)
+
+    def test_original_zip_names_are_validated_before_normalization(self):
+        for name, raw_name in [('docs/guide.mdXnote', b'docs/guide.md\0note'),
+                               ('docs/guide.md', b'docs\\guide.md')]:
+            archive = self.root / 'normalized.zip'
+            with zipfile.ZipFile(archive, 'w') as output:
+                output.writestr(name, b'fixture')
+            data = archive.read_bytes()
+            self.assertEqual(data.count(name.encode()), 2)
+            archive.write_bytes(data.replace(name.encode(), raw_name))
+            with self.subTest(name=raw_name), self.assertRaises(ValueError):
+                package.read_archive(archive)
+
+    def test_portable_unicode_and_device_prefixes_remain_valid(self):
+        for name in ('docs/COM10.md', 'docs/LPT0-guide.md', 'docs/auxiliary.md',
+                     'docs/guide with spaces.md', 'docs/caf\u00e9.md', 'docs/\u6307\u5357.md'):
+            with self.subTest(name=name):
+                self.assertEqual(str(package.safe_name(name)), name)
 
     def test_wrong_commit_and_renamed_archive_are_rejected(self):
         archive = self.fixture()
