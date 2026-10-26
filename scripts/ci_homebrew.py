@@ -63,6 +63,9 @@ def main() -> None:
     tag, spec = next(iter(bottle['tags'].items()))
     native = homebrew.verify_bottle(output, receipt, args.target, tag, spec, bottle['cellar'])
     run('brew', 'uninstall', '--force', homebrew.FORMULA)
+    # Uninstall revokes item trust. A local bottle path cannot grant it the way
+    # an ordinary fully qualified formula installation does.
+    run('brew', 'trust', '--formula', homebrew.FORMULA)
     run('brew', 'install', '--force-bottle', native)
     run('brew', 'test', homebrew.FORMULA)
     installed = json.loads(run('brew', 'info', '--json=v2', homebrew.FORMULA, capture=True).stdout)
