@@ -1,0 +1,35 @@
+class Hudson < Formula
+  desc "Operate Hudson agents and sandboxes"
+  homepage "https://github.com/hudson-frontier/hudson-cli"
+  url "https://github.com/hudson-frontier/hudson-cli/archive/@COMMIT@.tar.gz"
+  version "@VERSION@"
+  sha256 "@SHA256@"
+  license "Apache-2.0"
+
+  depends_on "rust" => :build
+
+  deny_network_access!
+
+  def fetch
+    system "cargo", "fetch", *std_cargo_fetch_args
+  end
+
+  def install
+    system "cargo", "install", *std_cargo_args, "--bin", "hudson"
+    generate_completions_from_executable(bin/"hudson", "completion", shells: [:bash, :zsh, :fish])
+    doc.install "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", "NOTICE"
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/hudson --version")
+    assert_match "sandbox", shell_output("#{bin}/hudson --help")
+    key = testpath/"mutation.key"
+    system bin/"hudson", "sandbox", "--json", "key", "--to", key
+    saved = key.read
+    refute_empty saved.strip
+    assert_operator saved.strip.length, :<=, 128
+    assert_equal 0o600, key.stat.mode & 0o777
+    shell_output("#{bin}/hudson sandbox --json key --to mutation.key", 1)
+    assert_equal saved, key.read
+  end
+end

@@ -4,6 +4,12 @@ A release promotes the exact archives produced by successful main-branch CI.
 Publishing does not rebuild the client. Version metadata in Cargo.toml,
 Cargo.lock, executable output and archive manifests must agree.
 
+Native CI also qualifies Homebrew source builds and fresh bottle installations
+on macOS Intel/Apple silicon and Linux x86_64. The read-only Homebrew preparation
+workflow composes matching tested bottles into a tap publication bundle. Follow
+[Homebrew distribution](homebrew.md) for the separate publication gate; ordinary
+code changes do not publish the CLI release or enable the tap.
+
 ## Readiness
 
 Before requesting publication:

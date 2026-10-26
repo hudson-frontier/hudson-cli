@@ -143,6 +143,7 @@ class PackagingTests(unittest.TestCase):
                         return SimpleNamespace(stdout='hudson 0.1.0\n' if kwargs.get('text') else b'# fixture completion\n', stderr=b'')
                     rejected = False
                     with patch.object(package, 'git', side_effect=git), \
+                            patch.object(package, 'version', return_value='0.1.0'), \
                             patch.object(package, 'dependency_notices', return_value=b'fixture license\n'), \
                             patch.object(package.subprocess, 'run', side_effect=command):
                         try:

@@ -11,6 +11,17 @@ hudson sandbox --config /private/client.json --json list
 
 ## Install
 
+Homebrew packaging is prepared for macOS and Linux x86_64. Once the corresponding
+release is published to the Hudson tap:
+
+```console
+brew install hudson-frontier/tap/hudson
+```
+
+Matching bottles provide a prebuilt installation with shell completion.
+See [Homebrew distribution](docs/homebrew.md) for availability, upgrades and source
+fallbacks. Cargo remains the source-install path below.
+
 Choose an archive from [Releases](https://github.com/hudson-frontier/hudson-cli/releases).
 Each contains `hudson`, optional `hudson-cli` and `hudsonbox` compatibility
 executables, completions, guides, licenses and a source manifest. Download the
@@ -34,7 +45,7 @@ Source builds require Rust 1.92.0 or newer. Install only the main executable
 unless you also need the compatibility names:
 
 ```console
-cargo install --git https://github.com/hudson-frontier/hudson-cli --tag v0.1.0 --locked --bin hudson
+cargo install --git https://github.com/hudson-frontier/hudson-cli --tag v0.1.1 --locked --bin hudson
 hudson --version
 hudson --help
 ```

@@ -31,7 +31,7 @@ BINARIES = ('hudson', 'hudson-cli', 'hudsonbox')
 SHELL_FILES = {'bash': 'hudson.bash', 'zsh': '_hudson', 'fish': 'hudson.fish',
                'powershell': 'hudson.ps1', 'elvish': 'hudson.elv'}
 REQUIRED_DOCS = ('install.md', 'agent.md', 'sandbox.md', 'automation.md',
-                 'troubleshooting.md', 'reference.md', 'releasing.md')
+                 'troubleshooting.md', 'reference.md', 'releasing.md', 'homebrew.md')
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 
