@@ -57,7 +57,8 @@ gh workflow run homebrew.yml --repo hudson-frontier/hudson-cli --ref main -f ci_
 
 This read-only workflow verifies the CI source and complete platform gate, checks
 both formula/source/version/bottle identities and fresh-install receipts,
-then retains `homebrew-publication-ready`. The bundle includes `tap/` with the
+then checks the composed formula with Homebrew's style and strict audit commands
+before retaining `homebrew-publication-ready`. The bundle includes `tap/` with the
 formula, bottle block, documentation and tap CI; `bottles/` with upload filenames;
 and `publication.json` with source and payload digests. Source downloads are
 compared with the committed Git tree without extracting downloaded files.

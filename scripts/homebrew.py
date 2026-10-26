@@ -196,10 +196,15 @@ def compose(directory: Path, output: Path, commit: str, version: str, ci_run: st
         path = verify_bottle(candidate, receipt, target, tag, spec, bottle['cellar'])
         candidates[tag] = (path, receipt)
     block = ['  bottle do', f'    root_url "https://github.com/hudson-frontier/homebrew-tap/releases/download/v{version}"']
+    checksums = []
     for tag, (_, receipt) in sorted(candidates.items()):
         cellar = receipt['cellar']
         value = ':' + cellar if cellar in {'any', 'any_skip_relocation'} else '"' + cellar + '"'
-        block.append(f'    sha256 cellar: {value}, {tag}: "{receipt["bottle_sha256"]}"')
+        checksums.append((f'    sha256 cellar: {value},', tag + ':', receipt['bottle_sha256']))
+    cellar_width = max(len(prefix) for prefix, _, _ in checksums)
+    tag_width = max(len(tag) for _, tag, _ in checksums)
+    for prefix, tag, checksum in checksums:
+        block.append(f'{prefix.ljust(cellar_width)} {tag.ljust(tag_width)} "{checksum}"')
     block.extend(['  end', ''])
     formula = render(commit, version, source['source_sha256'])
     formula = formula.replace('  depends_on "rust"', '\n'.join(block) + '\n  depends_on "rust"', 1)

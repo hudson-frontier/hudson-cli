@@ -2,6 +2,7 @@
 import io
 import json
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -49,7 +50,8 @@ class HomebrewTests(unittest.TestCase):
             receipt = {'schema': 1, 'commit': self.commit, 'version': self.version,
                        'source_url': homebrew.source_url(self.commit), 'source_sha256': self.source_sha,
                        'formula_sha256': package.digest(formula.encode()), 'target': target,
-                       'bottle_tag': tag, 'cellar': 'any_skip_relocation',
+                       'bottle_tag': tag,
+                       'cellar': 'any' if target.endswith('linux-gnu') else 'any_skip_relocation',
                        'bottle_file': f'hudson-{self.version}.{tag}.bottle.tar.gz',
                        'bottle_sha256': checksum, 'poured_from_bottle': True}
             (folder / 'verified-bottle.json').write_text(json.dumps(receipt))
@@ -140,6 +142,16 @@ class HomebrewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             homebrew.compose(candidates, self.root / 'ready', self.commit, self.version, '123')
         self.assertFalse((self.root / 'ready').exists())
+
+    def test_composed_bottle_checksums_follow_homebrew_alignment(self):
+        candidates = self.candidates()
+        output = self.root / 'ready'
+        homebrew.compose(candidates, output, self.commit, self.version, '123')
+        formula = (output / 'tap/Formula/hudson.rb').read_text()
+        lines = [line for line in formula.splitlines() if line.strip().startswith('sha256 cellar:')]
+        self.assertEqual(len(lines), 2)
+        for expression in [r'\b(?:arm64_sequoia|x86_64_linux):', r'"[0-9a-f]{64}"']:
+            self.assertEqual(len({re.search(expression, line).start() for line in lines}), 1)
 
 
 if __name__ == '__main__':
