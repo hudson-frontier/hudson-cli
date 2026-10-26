@@ -49,6 +49,9 @@ existing native validation jobs also retain `homebrew-*` artifacts for the two
 bottle targets. Every native and policy job must pass; no publishing job rebuilds
 the application.
 
+The aggregate CI check composes both tested bottles and audits the resulting
+formula on branch, PR and main runs, including its public file permissions.
+
 After the matching main CI run succeeds, prepare a reviewable bundle:
 
 ```console
