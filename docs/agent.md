@@ -119,6 +119,8 @@ submitting tasks and replies so uncertain results can be reconciled. Use `start`
 and `follow` for scripts instead of piping input to a terminal session.
 Server-supplied display fields escape line breaks, tabs, terminal controls and
 Unicode direction controls so they stay within their labeled output line.
+If terminal output fails, the session exits with code 1. Tasks and replies are
+sent only after their request key has been written and flushed successfully.
 
 ## Errors
 
