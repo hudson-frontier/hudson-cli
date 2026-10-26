@@ -90,6 +90,12 @@ def verify_source(data: bytes, expected: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def committed_archive(commit: str) -> bytes:
+    # Match GitHub's committed bytes even when the caller checks out CRLF files.
+    return subprocess.check_output(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf',
+                                    'archive', '--format=tar', commit], cwd=package.ROOT)
+
+
 def render(commit: str, version: str, checksum: str) -> str:
     identifiers(commit, version, checksum)
     text = TEMPLATE.read_text(encoding='utf-8')
@@ -112,7 +118,7 @@ def prepare(destination: Path) -> dict:
     if destination.exists() or destination.is_symlink():
         raise ValueError('Use a new Homebrew output directory')
     destination.mkdir(parents=True, mode=0o700)
-    expected = subprocess.check_output(['git', 'archive', '--format=tar', commit], cwd=package.ROOT)
+    expected = committed_archive(commit)
     url = source_url(commit)
     with urllib.request.urlopen(url, timeout=60) as response:
         if not response.geturl().startswith(('https://github.com/', 'https://codeload.github.com/')):

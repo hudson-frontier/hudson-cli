@@ -2,9 +2,11 @@
 import io
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import homebrew
 import package
@@ -67,6 +69,25 @@ class HomebrewTests(unittest.TestCase):
         for changed in [{'Cargo.toml': b'package\n'}, dict(files, **{'src/main.rs': b'tampered'})]:
             with self.subTest(changed=changed), self.assertRaises(ValueError):
                 homebrew.verify_source(archive(changed, prefix='hudson-source/'), expected)
+
+    def test_source_comparison_ignores_checkout_line_endings(self):
+        repository = self.root / 'repository'
+        repository.mkdir()
+
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(repository), *args], stderr=subprocess.STDOUT)
+
+        git('init', '--initial-branch=main')
+        git('config', 'core.autocrlf', 'true')
+        content = b'[package]\nname = "fixture"\n'
+        (repository / 'Cargo.toml').write_bytes(content.replace(b'\n', b'\r\n'))
+        git('add', 'Cargo.toml')
+        git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@hudson.invalid',
+            '-c', 'commit.gpgsign=false', 'commit', '-m', 'Source fixture')
+        with patch.object(package, 'ROOT', repository):
+            expected = homebrew.committed_archive('HEAD')
+        downloaded = archive({'Cargo.toml': content}, prefix='hudson-source/')
+        self.assertEqual(homebrew.verify_source(downloaded, expected), package.digest(downloaded))
 
     def test_source_rejects_traversal_symlinks_and_growth(self):
         for name in ['../escape', '/absolute', 'root/../escape', 'root\\escape']:

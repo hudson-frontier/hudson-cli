@@ -16,7 +16,7 @@ class Hudson < Formula
 
   def install
     system "cargo", "install", *std_cargo_args, "--bin", "hudson"
-    generate_completions_from_executable(bin/"hudson", "completion", shells: [:bash, :zsh, :fish])
+    generate_completions_from_executable(bin/"hudson", "completion")
     doc.install "docs", "README.md", "CHANGELOG.md", "CONTRIBUTING.md", "SECURITY.md", "LICENSE", "NOTICE"
   end
 
@@ -28,7 +28,7 @@ class Hudson < Formula
     saved = key.read
     refute_empty saved.strip
     assert_operator saved.strip.length, :<=, 128
-    assert_equal 0o600, key.stat.mode & 0o777
+    assert_equal 0600, key.stat.mode & 0777
     shell_output("#{bin}/hudson sandbox --json key --to mutation.key", 1)
     assert_equal saved, key.read
   end
