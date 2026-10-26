@@ -6,6 +6,23 @@ use std::io::{self, BufRead, IsTerminal, Read, Write};
 
 type Error = Box<dyn std::error::Error>;
 
+#[derive(Debug)]
+struct OutputFailure(io::Error);
+
+impl std::fmt::Display for OutputFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(
+            "cannot write terminal output; inspect the outcome before retrying a mutation",
+        )
+    }
+}
+
+impl std::error::Error for OutputFailure {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
 /// Keep untrusted display fields on one line, including ANSI and bidi controls.
 fn safe(text: &str) -> String {
     text.chars()
@@ -50,34 +67,34 @@ fn request(client: &Client, base: &str, path: &str, body: Option<Value>) -> Resu
     Ok(serde_json::from_slice(&bytes)?)
 }
 
-fn display(record: Value) -> Result<(), String> {
+fn display(output: &mut impl Write, record: Value) -> io::Result<()> {
     if record["type"] == "event" {
         let event = &record["event"];
-        println!(
+        writeln!(
+            output,
             "[{}] {} {}",
             record["after"],
             safe(event["event_type"].as_str().unwrap_or("event")),
             safe(&event["payload"].to_string())
-        );
+        )?;
     } else {
         let run = &record["run"];
-        println!(
+        writeln!(
+            output,
             "Status: {}",
             safe(run["status"].as_str().unwrap_or("unknown"))
-        );
+        )?;
         if !run["wait"].is_null() {
-            println!("Waiting: {}", safe(&run["wait"].to_string()));
+            writeln!(output, "Waiting: {}", safe(&run["wait"].to_string()))?;
         }
         if !run["result"].is_null() {
-            println!("Result: {}", safe(&run["result"].to_string()));
+            writeln!(output, "Result: {}", safe(&run["result"].to_string()))?;
         }
         if let Some(reason) = run["reason"].as_str() {
-            println!("Reason: {}", safe(reason));
+            writeln!(output, "Reason: {}", safe(reason))?;
         }
     }
-    io::stdout()
-        .flush()
-        .map_err(|_| "cannot write terminal output".into())
+    output.flush()
 }
 
 const HELP: &str = "Type a task to create a new run. Each task is independent.\n/open UUID | /follow | /status | /reply QUESTION_ID answer\n/approve OPERATION_UUID | /deny OPERATION_UUID | /resume | /cancel | /help | /quit\nCtrl-C exits the client; it does not cancel the run. Use /cancel explicitly.";
@@ -93,11 +110,12 @@ fn action(
     session: &Session,
     line: &str,
     active: &mut Option<String>,
+    output: &mut impl Write,
 ) -> Result<bool, Error> {
     let (command, argument) = line.split_once(' ').unwrap_or((line, ""));
     match command {
         "/quit" => return Ok(false),
-        "/help" => println!("{HELP}"),
+        "/help" => writeln!(output, "{HELP}").map_err(OutputFailure)?,
         "/open" => {
             let run = id(argument.trim())?;
             request(client, base, &format!("/runs/{run}"), None)?;
@@ -105,7 +123,7 @@ fn action(
         }
         "/status" => {
             let value = request(client, base, &format!("/runs/{}", current(active)?), None)?;
-            display(json!({"type":"run", "run":value})).map_err(|e| -> Error { e.into() })?;
+            display(output, json!({"type":"run", "run":value})).map_err(OutputFailure)?;
         }
         "/follow" => {}
         "/resume" | "/cancel" => {
@@ -138,8 +156,12 @@ fn action(
                 .map_err(|_| "question ID must be an unsigned integer")?;
             let run = current(active)?;
             let key = uuid::Uuid::new_v4().to_string();
-            println!("Reply request key: {key} (retain for an ambiguous retry)");
-            io::stdout().flush()?;
+            writeln!(
+                output,
+                "Reply request key: {key} (retain for an ambiguous retry)"
+            )
+            .map_err(OutputFailure)?;
+            output.flush().map_err(OutputFailure)?;
             request(
                 client,
                 base,
@@ -154,13 +176,17 @@ fn action(
             if let Some(agent) = &session.agent {
                 body["agent_ref"] = json!({"id":super::client::definition_name(agent)?,"version":session.agent_version.ok_or("agent version required")?});
             }
-            println!("Submission request key: {key} (retain for an ambiguous retry)");
-            io::stdout().flush()?;
+            writeln!(
+                output,
+                "Submission request key: {key} (retain for an ambiguous retry)"
+            )
+            .map_err(OutputFailure)?;
+            output.flush().map_err(OutputFailure)?;
             let response = request(client, base, "/runs", Some(body))?;
             let run = id(response["run_id"]
                 .as_str()
                 .ok_or("submission response has no run ID")?)?;
-            println!("Run: {run}");
+            writeln!(output, "Run: {run}").map_err(OutputFailure)?;
             *active = Some(run);
         }
     }
@@ -174,15 +200,19 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
     if let Some(agent) = &session.agent {
         super::client::definition_name(agent)?;
     }
-    println!("Hudson • interactive local API session\nProject: {}\nCurrent directory is display context only; no files are uploaded and tools remain host-configured.", safe(&std::env::current_dir()?.display().to_string()));
-    println!("Connect to an existing hudson-server; /help lists controls.\n{HELP}");
+    let mut output = io::stdout().lock();
+    writeln!(output, "Hudson • interactive local API session\nProject: {}\nCurrent directory is display context only; no files are uploaded and tools remain host-configured.", safe(&std::env::current_dir()?.display().to_string()))?;
+    writeln!(
+        output,
+        "Connect to an existing hudson-server; /help lists controls.\n{HELP}"
+    )?;
     let mut active = None;
     let mut cursor = 0;
     let input = io::stdin();
     let mut input = input.lock();
     loop {
-        print!("hudson> ");
-        io::stdout().flush()?;
+        write!(output, "hudson> ")?;
+        output.flush()?;
         // Bound allocation even for paste/input containing no newline.
         let mut bytes = Vec::new();
         let count = input
@@ -201,9 +231,12 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
             continue;
         }
         let previous = active.clone();
-        match action(client, base, &session, line, &mut active) {
+        match action(client, base, &session, line, &mut active, &mut output) {
             Ok(false) => break,
             Err(error) => {
+                if error.downcast_ref::<OutputFailure>().is_some() {
+                    return Err(error);
+                }
                 eprintln!("{}", safe(&error.to_string()));
                 continue;
             }
@@ -217,6 +250,7 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
         }
         if let Some(run) = &active {
             // Callback tracks emitted cursor even when a later read fails.
+            let mut output_error = None;
             let result = follow::observe(
                 client,
                 base,
@@ -230,13 +264,19 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
                 },
                 true,
                 |record| {
-                    display(record.clone())?;
+                    display(&mut output, record.clone()).map_err(|error| {
+                        output_error = Some(error);
+                        "cannot write terminal output".to_owned()
+                    })?;
                     if let Some(after) = record["after"].as_u64() {
                         cursor = after;
                     }
                     Ok(())
                 },
             );
+            if let Some(error) = output_error {
+                return Err(OutputFailure(error).into());
+            }
             if let Err(reason) = result {
                 eprintln!("{}; /follow retries observation", safe(&reason.to_string()));
             }
@@ -248,6 +288,76 @@ pub fn run(client: &Client, base: &str, session: Session) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BrokenOutput {
+        on_flush: bool,
+    }
+
+    impl Write for BrokenOutput {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if self.on_flush {
+                Ok(bytes.len())
+            } else {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    #[test]
+    fn terminal_records_propagate_write_and_flush_failures() {
+        for on_flush in [false, true] {
+            for record in [
+                json!({"type":"event","after":1,"event":{"event_type":"progress","payload":{}}}),
+                json!({"type":"run","run":{"status":"completed","result":{"answer":"done"},"reason":"finished"}}),
+            ] {
+                assert_eq!(
+                    display(&mut BrokenOutput { on_flush }, record)
+                        .unwrap_err()
+                        .kind(),
+                    io::ErrorKind::BrokenPipe
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tasks_and_replies_require_a_written_and_flushed_request_key() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let client = Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_millis(100))
+            .build()
+            .unwrap();
+        for on_flush in [false, true] {
+            for line in ["new task", "/reply 7 answer"] {
+                let mut active = Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_owned());
+                let error = action(
+                    &client,
+                    &base,
+                    &Session::default(),
+                    line,
+                    &mut active,
+                    &mut BrokenOutput { on_flush },
+                )
+                .unwrap_err();
+                assert_eq!(
+                    error.downcast_ref::<OutputFailure>().unwrap().0.kind(),
+                    io::ErrorKind::BrokenPipe
+                );
+                assert_eq!(
+                    listener.accept().unwrap_err().kind(),
+                    io::ErrorKind::WouldBlock
+                );
+            }
+        }
+    }
+
     #[test]
     fn escapes_terminal_injection_and_bidi_but_retains_readable_text() {
         assert_eq!(safe("hello\n\tworld"), "hello\\u{a}\\u{9}world");
