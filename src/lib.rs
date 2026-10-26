@@ -58,18 +58,33 @@ fn parse(args: &[OsString]) -> Result<Invocation, clap::Error> {
     }
 }
 
+fn error_cause<'a, T: std::error::Error + 'static>(
+    error: &'a (dyn std::error::Error + 'static),
+) -> Option<&'a T> {
+    let mut current = Some(error);
+    while let Some(error) = current {
+        if let Some(cause) = error.downcast_ref::<T>() {
+            return Some(cause);
+        }
+        current = error.source();
+    }
+    None
+}
+
 fn agent_execute(args: agent::commands::Args) -> ExitCode {
     let json = args.json;
     match agent::client::execute(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let (kind, status, message) = if let Some(http) =
-                error.downcast_ref::<agent::client::HttpFailure>()
+                error_cause::<agent::client::HttpFailure>(error.as_ref())
             {
-                ("http", Some(http.0.as_u16()), http.to_string())
-            } else if let Some(protocol) = error.downcast_ref::<agent::client::ProtocolFailure>() {
-                ("protocol", None, protocol.to_string())
-            } else if let Some(request) = error.downcast_ref::<reqwest::Error>() {
+                ("http", Some(http.0.as_u16()), error.to_string())
+            } else if error_cause::<agent::client::ProtocolFailure>(error.as_ref()).is_some() {
+                ("protocol", None, error.to_string())
+            } else if error_cause::<agent::client::TransportFailure>(error.as_ref()).is_some() {
+                ("transport", None, error.to_string())
+            } else if let Some(request) = error_cause::<reqwest::Error>(error.as_ref()) {
                 let (kind, message) = if request.is_timeout() {
                     ("timeout", "Agent API request timed out. Inspect the outcome before retrying a mutation.")
                 } else if request.is_decode() {

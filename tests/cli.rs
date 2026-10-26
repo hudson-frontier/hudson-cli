@@ -628,6 +628,151 @@ async fn agent_closed_output_pipe_returns_an_error_without_panicking() {
 }
 
 #[tokio::test]
+async fn agent_follow_preserves_http_errors_and_the_last_emitted_cursor() {
+    for (binary, namespace) in [(HUDSON, vec!["agent"]), (AGENT, vec![])] {
+        let server = Server::http(vec![
+            Reply::ok(json!({"id":RUN,"status":"running"})),
+            Reply::ok(json!([{"run_id":RUN,"sequence":43,"event_type":"progress"}])),
+            Reply {
+                status: "401 Unauthorized",
+                body: json!({"error":"fixture-private-token"}),
+                headers: "",
+            },
+        ])
+        .await;
+        let mut args = namespace;
+        args.extend([
+            "--url",
+            &server.url,
+            "--json",
+            "follow",
+            RUN,
+            "--after",
+            "42",
+            "--max-retries",
+            "0",
+        ]);
+        let output = cli(binary, &args, 1).await;
+        let record: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(record["type"], "event");
+        assert_eq!(record["after"], 43);
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"], "http");
+        assert_eq!(error["http_status"], 401);
+        assert!(error["message"].as_str().unwrap().contains("--after 43"));
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(
+            requests[2].path,
+            format!("/runs/{RUN}/events?after=43&limit=100")
+        );
+        assert!(requests.iter().all(|request| request.method == "GET"));
+    }
+}
+
+#[tokio::test]
+async fn agent_follow_reports_protocol_errors_before_emitting_invalid_records() {
+    for body in [
+        json!({"id":RUN,"status":"unexpected"}),
+        json!({"id":"other","status":"completed"}),
+    ] {
+        let server = Server::http(vec![Reply::ok(body)]).await;
+        let output = cli(
+            HUDSON,
+            &[
+                "agent",
+                "--url",
+                &server.url,
+                "--json",
+                "follow",
+                RUN,
+                "--after",
+                "42",
+            ],
+            1,
+        )
+        .await;
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"], "protocol");
+        assert!(error["http_status"].is_null());
+        assert!(error["message"].as_str().unwrap().contains("--after 42"));
+    }
+}
+
+#[tokio::test]
+async fn agent_follow_json_retries_keep_stderr_machine_readable() {
+    for recover in [false, true] {
+        let unavailable = || Reply {
+            status: "503 Service Unavailable",
+            body: json!({"error":"fixture-private-token"}),
+            headers: "",
+        };
+        let mut replies = vec![unavailable()];
+        if recover {
+            replies.extend([
+                Reply::ok(json!({"id":RUN,"status":"completed"})),
+                Reply::ok(json!([])),
+            ]);
+        } else {
+            replies.push(unavailable());
+        }
+        let server = Server::http(replies).await;
+        let output = cli(
+            HUDSON,
+            &[
+                "agent",
+                "--url",
+                &server.url,
+                "--json",
+                "follow",
+                RUN,
+                "--max-retries",
+                "1",
+                "--poll-ms",
+                "50",
+            ],
+            if recover { 0 } else { 1 },
+        )
+        .await;
+        if recover {
+            assert!(output.stderr.is_empty());
+            let record: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(record["run"]["status"], "completed");
+        } else {
+            assert!(output.stdout.is_empty());
+            let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+            assert_eq!(error["error"], "http");
+            assert_eq!(error["http_status"], 503);
+            assert!(error["message"].as_str().unwrap().contains("--after 0"));
+        }
+        assert_eq!(
+            server.requests.lock().unwrap().len(),
+            if recover { 3 } else { 2 }
+        );
+    }
+}
+
+#[tokio::test]
+async fn agent_follow_classifies_bounded_reads_without_echoing_response_content_or_urls() {
+    for (response, kind, status) in [
+        (b"HTTP/1.1 403 Forbidden\r\nContent-Length: 21\r\nConnection: close\r\n\r\nfixture-private-token".to_vec(), "http", json!(403)),
+        (b"HTTP/1.1 200 OK\r\nContent-Length: 21\r\nConnection: close\r\n\r\nfixture-private-token".to_vec(), "protocol", Value::Null),
+        (b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{".to_vec(), "transport", Value::Null),
+    ] {
+        let server = Server::raw_http(response).await;
+        let url = format!("{}/fixture-private-token", server.url);
+        let output = cli(HUDSON, &["agent", "--url", &url, "--json", "follow", RUN, "--after", "42", "--max-retries", "0"], 1).await;
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert_eq!(error["error"], kind);
+        assert_eq!(error["http_status"], status);
+        assert!(error["message"].as_str().unwrap().contains("--after 42"));
+        assert_eq!(server.requests.lock().unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn agent_command_routes_and_payloads_are_preserved() {
     let operation = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
     let directory = tempfile::tempdir().unwrap();

@@ -46,6 +46,9 @@ hudson agent follow RUN_UUID --after 42
 `after` value; failure diagnostics include a reconnect cursor. Observation retries
 do not resubmit a task. Ctrl-C stops the client without cancelling the run.
 A completed run returns success; failed and cancelled runs return nonzero.
+With `--json`, follow failures retain their HTTP, protocol or transport category
+and the reconnect cursor. Transient retries omit human progress messages so stderr
+contains only the final error document, if observation fails.
 
 Read one JSON value from a file or select stdin explicitly:
 
@@ -116,6 +119,8 @@ submitting tasks and replies so uncertain results can be reconciled. Use `start`
 and `follow` for scripts instead of piping input to a terminal session.
 Server-supplied display fields escape line breaks, tabs, terminal controls and
 Unicode direction controls so they stay within their labeled output line.
+If terminal output fails, the session exits with code 1. Tasks and replies are
+sent only after their request key has been written and flushed successfully.
 
 ## Errors
 

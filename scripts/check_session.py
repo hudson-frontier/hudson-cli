@@ -130,16 +130,70 @@ def exercise(binary: Path, namespace: bool):
         server.server_close()
 
 
+def exercise_disconnected_output(binary: Path, namespace: bool):
+    requests = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            requests.append(self.path)
+            self.send_error(500)
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    input_master, input_slave = pty.openpty()
+    output_master, output_slave = pty.openpty()
+    arguments = [str(binary)] + (['agent'] if namespace else [])
+    arguments += ['--url', f'http://127.0.0.1:{server.server_port}']
+    environment = dict(os.environ)
+    for name in ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']:
+        environment.pop(name, None)
+    child = subprocess.Popen(arguments, stdin=input_slave, stdout=output_slave,
+                             stderr=subprocess.PIPE, env=environment)
+    os.close(input_slave)
+    os.close(output_slave)
+    try:
+        output = bytearray()
+        deadline = time.monotonic() + 10
+        while b'hudson> ' not in output:
+            if time.monotonic() >= deadline:
+                raise AssertionError('Session did not reach its initial prompt')
+            ready, _, _ = select.select([output_master], [], [], .1)
+            if ready:
+                output.extend(os.read(output_master, 65536))
+        os.close(output_master)
+        output_master = None
+        os.write(input_master, b'This task must not be submitted\n')
+        _, error = child.communicate(timeout=10)
+        assert child.returncode == 1, (child.returncode, error)
+        assert b'cannot write terminal output' in error, error
+        assert b'panicked' not in error, error
+        assert not requests, requests
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        child.stderr.close()
+        os.close(input_master)
+        if output_master is not None:
+            os.close(output_master)
+        server.shutdown()
+        server.server_close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path, required=True)
     args = parser.parse_args()
     for namespace in [False, True]:
         exercise(args.binary.resolve(), namespace)
+        exercise_disconnected_output(args.binary.resolve(), namespace)
     result = subprocess.run([str(args.binary.resolve())], input='/quit\n',
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 1 and 'requires a terminal' in result.stderr
-    print('Terminal sessions passed: task, reply, controls, auth, escaping and compatibility')
+    print('Terminal sessions passed: task, reply, controls, auth, escaping, disconnected output and compatibility')
 
 
 if __name__ == '__main__':
