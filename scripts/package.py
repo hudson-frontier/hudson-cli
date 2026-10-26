@@ -100,13 +100,15 @@ def binary_header(data: bytes, target: str) -> None:
 
 def safe_name(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
-    if not name or '\\' in name or '\0' in name or ':' in name or path.is_absolute():
+    if (not name or not name.isprintable() or any(char in name for char in '\\:<>"|?*')
+            or path.is_absolute()):
         raise ValueError('Unsafe archive path')
     if any(part in ('', '.', '..') for part in name.split('/')):
         raise ValueError('Unsafe archive path')
-    reserved = {'CON', 'PRN', 'AUX', 'NUL'} | {
-        f'{prefix}{number}' for prefix in ('COM', 'LPT') for number in range(1, 10)}
-    if any(part.rstrip(' .') != part or part.split('.')[0].upper() in reserved for part in path.parts):
+    reserved = {'CON', 'PRN', 'AUX', 'NUL', 'CONIN$', 'CONOUT$'} | {
+        f'{prefix}{number}' for prefix in ('COM', 'LPT') for number in '123456789\u00b9\u00b2\u00b3'}
+    if any(part.rstrip(' .') != part or part.split('.')[0].rstrip(' ').upper() in reserved
+           for part in path.parts):
         raise ValueError('Unsafe portable archive path')
     return path
 
@@ -132,6 +134,7 @@ def read_archive(archive: Path) -> dict[str, tuple[bytes, int]]:
     if archive.name.endswith('.zip'):
         with zipfile.ZipFile(archive) as source:
             for entry in source.infolist():
+                safe_name(entry.orig_filename.rstrip('/'))
                 if entry.is_dir():
                     safe_name(entry.filename.rstrip('/'))
                     continue
