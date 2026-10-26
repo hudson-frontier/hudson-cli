@@ -1,0 +1,36 @@
+name: Homebrew checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: homebrew-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: Homebrew (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, ubuntu-24.04]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: Homebrew/actions/setup-homebrew@4790763c0a3ba4036f72634dc079c4a7dfcd4878 # 2026.10.19.1
+        with:
+          stable: true
+      - name: Audit and install the pinned bottle
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_ANALYTICS: '1'
+        run: |
+          brew trust --formula hudson-frontier/tap/hudson
+          brew style hudson-frontier/tap/hudson
+          brew audit --strict --formula hudson-frontier/tap/hudson
+          brew install --force-bottle hudson-frontier/tap/hudson
+          brew test hudson-frontier/tap/hudson

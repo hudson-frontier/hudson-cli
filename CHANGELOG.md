@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1
+
+- Prepare Homebrew source formulae and native bottles for the Hudson tap.
+- Include the merged TLS verification and trust-store updates, protected JSON
+  input file handling, authenticated loopback transport fixes and terminal output
+  fixes since 0.1.0.
+- Preserve the existing native archives and Cargo source-install workflow.
+
+Publication is a separate maintainer action after the complete release checks.
+
 ## 0.1.0
 
 Initial standalone Hudson CLI release.
