@@ -50,15 +50,7 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_ANALYTICS: '1'
-        run: |
-          brew tap-new --no-git hudson-frontier/tap
-          tap_path="$(brew --repository hudson-frontier/tap)"
-          git -C "$tap_path" init --initial-branch=main
-          git -C "$tap_path" remote add origin https://github.com/hudson-frontier/homebrew-tap
-          cp "$RUNNER_TEMP/homebrew-ready/tap/Formula/hudson.rb" "$tap_path/Formula/hudson.rb"
-          brew trust --formula hudson-frontier/tap/hudson
-          brew style hudson-frontier/tap/hudson
-          brew audit --strict --formula hudson-frontier/tap/hudson
+        run: python scripts/check_homebrew_formula.py --formula "$RUNNER_TEMP/homebrew-ready/tap/Formula/hudson.rb"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: homebrew-publication-ready
