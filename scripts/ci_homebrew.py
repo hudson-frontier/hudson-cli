@@ -19,7 +19,10 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.resolve()
     receipt = homebrew.prepare(output)
-    environment = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE='1', HOMEBREW_NO_ANALYTICS='1')
+    # Developer mode permits installing the local bottle we just built; ordinary
+    # user installs still use the fully qualified, trusted formula and URL.
+    environment = dict(os.environ, HOMEBREW_NO_AUTO_UPDATE='1', HOMEBREW_NO_ANALYTICS='1',
+                       HOMEBREW_DEVELOPER='1')
 
     def run(*command, capture=False):
         print('Running:', ' '.join(map(str, command)), flush=True)

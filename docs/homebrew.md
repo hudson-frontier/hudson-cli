@@ -22,8 +22,9 @@ remain separately owned. Installation never starts a backend service or VM.
 The formula pins a full CLI source commit, source archive SHA-256 and explicit
 release version. Its locked Cargo build installs only the primary executable.
 Source installation uses Homebrew's Rust build dependency, fetches the locked
-dependencies first, then builds and tests without network access. A matching prebuilt
-bottle avoids a Rust build during ordinary installation.
+dependencies first, then uses Cargo's offline build mode. Its functional tests
+need no service or credentials. A matching prebuilt bottle avoids a Rust build
+during ordinary installation.
 
 Native CI builds and tests bottles on macOS 15 Apple silicon and Intel, and
 Linux x86_64 on Ubuntu 22.04. It tests offline help, private request-key creation
