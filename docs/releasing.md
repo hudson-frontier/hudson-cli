@@ -66,6 +66,10 @@ Each archive has one versioned root directory with `bin`, `completions`, `docs`,
 licenses and `manifest.json`. The manifest records version, source commit,
 target, file modes, sizes and SHA-256 digests. Archives reject unexpected paths,
 duplicates, symlinks and mismatched architecture or source metadata.
+Archive paths must use printable, portable names. Validation rejects device
+aliases, reserved filename characters and nonprinting Unicode before creating
+an installation directory.
+Original ZIP names are validated as well as the paths used for extraction.
 
 ## Publish
 
