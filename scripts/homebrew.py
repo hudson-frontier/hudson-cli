@@ -21,9 +21,8 @@ TEMPLATE = package.ROOT / 'packaging/homebrew/hudson.rb.in'
 MAX_SOURCE = 32 * 1024 * 1024
 MAX_FILES = 4096
 SUPPORTED_TARGETS = {
-    'x86_64-unknown-linux-gnu',
-    'x86_64-apple-darwin',
-    'aarch64-apple-darwin',
+    'x86_64-unknown-linux-gnu': 'x86_64_linux',
+    'aarch64-apple-darwin': 'arm64_sequoia',
 }
 
 
@@ -135,11 +134,7 @@ def prepare(destination: Path) -> dict:
 
 
 def verify_bottle(directory: Path, source: dict, target: str, tag: str, spec: dict, cellar: str) -> Path:
-    if target not in SUPPORTED_TARGETS or not re.fullmatch(r'[a-z0-9_]+', tag):
-        raise ValueError('Invalid native bottle target/tag')
-    if ((target == 'x86_64-unknown-linux-gnu' and tag != 'x86_64_linux')
-            or (target == 'aarch64-apple-darwin' and not tag.startswith('arm64_'))
-            or (target == 'x86_64-apple-darwin' and (tag.startswith('arm64_') or tag.endswith('_linux')))):
+    if SUPPORTED_TARGETS.get(target) != tag:
         raise ValueError('Bottle tag does not match the native target')
     if cellar not in {'any', 'any_skip_relocation', '/opt/homebrew/Cellar', '/usr/local/Cellar',
                       '/home/linuxbrew/.linuxbrew/Cellar'}:

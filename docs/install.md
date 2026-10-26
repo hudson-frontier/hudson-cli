@@ -12,10 +12,11 @@ executable and shell completion with:
 brew install hudson-frontier/tap/hudson
 ```
 
-Matching native bottles provide macOS Apple silicon/Intel and Linux x86_64
+Matching native bottles provide macOS Apple silicon and Linux x86_64
 installations. Source fallback uses the pinned release and Homebrew's Rust build
 dependency. See [Homebrew distribution](homebrew.md) for the publication and
-upgrade contract. Native archives below remain available independently.
+upgrade contract. Use the native archives or Cargo on Intel Macs, Windows and
+Linux aarch64. Native archives below remain available independently.
 
 ## Choose the archive
 

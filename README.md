@@ -11,8 +11,8 @@ hudson sandbox --config /private/client.json --json list
 
 ## Install
 
-Homebrew packaging is prepared for macOS and Linux x86_64. Once the corresponding
-release is published to the Hudson tap:
+Homebrew packaging is prepared for macOS Apple silicon and Linux x86_64. Once the
+corresponding release is published to the Hudson tap:
 
 ```console
 brew install hudson-frontier/tap/hudson

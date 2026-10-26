@@ -26,7 +26,7 @@ dependencies first, then uses Cargo's offline build mode. Its functional tests
 need no service or credentials. A matching prebuilt bottle avoids a Rust build
 during ordinary installation.
 
-Native CI builds and tests bottles on macOS 15 Apple silicon and Intel, and
+Native CI builds and tests bottles on macOS 15 Apple silicon and
 Linux x86_64 on Ubuntu 22.04. It tests offline help, private request-key creation
 and overwrite rejection, then uninstalls the source build, pours the actual
 bottle and repeats the functional test. The installed receipt must identify a
@@ -34,13 +34,18 @@ bottle installation at the selected version. No system outside that tested
 Homebrew configuration is qualified by these checks. Native archives retain
 their separately documented platform and signing limits.
 
+The formula accepts Apple silicon Macs and Linux x86_64. Use the native archives
+or Cargo for Intel Macs, Windows and Linux aarch64. Homebrew no longer builds new
+Intel dependency bottles, so Hudson's tap does not promise an Intel source build
+or bottle. See [Homebrew's support tiers](https://docs.brew.sh/Support-Tiers).
+
 The tap becomes available after an authorized CLI release and its Homebrew
 publication. CI artifacts and a merged packaging change do not publish a release.
 
 ## Prepare a release
 
 Run the complete [release qualification](releasing.md) for current `main`. The
-existing native validation jobs also retain `homebrew-*` artifacts for the three
+existing native validation jobs also retain `homebrew-*` artifacts for the two
 bottle targets. Every native and policy job must pass; no publishing job rebuilds
 the application.
 
@@ -51,7 +56,7 @@ gh workflow run homebrew.yml --repo hudson-frontier/hudson-cli --ref main -f ci_
 ```
 
 This read-only workflow verifies the CI source and complete platform gate, checks
-all three formula/source/version/bottle identities and fresh-install receipts,
+both formula/source/version/bottle identities and fresh-install receipts,
 then retains `homebrew-publication-ready`. The bundle includes `tap/` with the
 formula, bottle block, documentation and tap CI; `bottles/` with upload filenames;
 and `publication.json` with source and payload digests. Source downloads are
@@ -65,7 +70,7 @@ public tag resolves to the bundle's source commit. Never substitute another
 commit under the same version or replace an existing archive or bottle.
 
 Create the `hudson-frontier/homebrew-tap` public repository with an initial README
-if it does not exist. Publish the three already tested bottle files in a new
+if it does not exist. Publish the two already tested bottle files in a new
 release at `vVERSION` in that repository. Download the uploaded files and compare
 each SHA-256 with `publication.json` before enabling the formula. Existing
 conflicting tags/releases require investigation rather than replacement.

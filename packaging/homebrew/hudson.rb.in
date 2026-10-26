@@ -8,6 +8,14 @@ class Hudson < Formula
 
   depends_on "rust" => :build
 
+  on_macos do
+    depends_on arch: :arm64
+  end
+
+  on_linux do
+    depends_on arch: :x86_64
+  end
+
   deny_network_access!
 
   def fetch

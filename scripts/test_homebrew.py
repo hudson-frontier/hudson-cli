@@ -37,7 +37,7 @@ class HomebrewTests(unittest.TestCase):
         directory = self.root / 'candidates'
         directory.mkdir()
         tags = {'x86_64-unknown-linux-gnu': 'x86_64_linux',
-                'x86_64-apple-darwin': 'sequoia', 'aarch64-apple-darwin': 'arm64_sequoia'}
+                'aarch64-apple-darwin': 'arm64_sequoia'}
         for target, tag in tags.items():
             folder = directory / ('homebrew-' + target)
             folder.mkdir()
@@ -112,7 +112,7 @@ class HomebrewTests(unittest.TestCase):
         candidates = self.candidates()
         output = self.root / 'ready'
         result = homebrew.compose(candidates, output, self.commit, self.version, '123')
-        self.assertEqual(len(result['bottles']), 3)
+        self.assertEqual(len(result['bottles']), 2)
         formula = (output / 'tap/Formula/hudson.rb').read_text()
         for name, digest in result['bottles'].items():
             self.assertEqual(package.digest((output / 'bottles' / name).read_bytes()), digest)

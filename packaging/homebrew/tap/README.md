@@ -21,9 +21,9 @@ and remain after removing the client. This formula installs `hudson`; optional
 archives or through Cargo source installation.
 
 The formula pins immutable CLI source bytes and native bottle checksums. Matching
-bottles provide macOS Apple silicon/Intel and Linux x86_64 installations; other
-supported Homebrew configurations can build from the pinned source. Windows and
-Linux aarch64 archives remain available from
+bottles provide macOS Apple silicon and Linux x86_64 installations, with a pinned
+source build available on those platforms. Intel Mac, Windows and Linux aarch64
+archives remain available from
 [Hudson CLI releases](https://github.com/hudson-frontier/hudson-cli/releases).
 
 ## Maintenance
