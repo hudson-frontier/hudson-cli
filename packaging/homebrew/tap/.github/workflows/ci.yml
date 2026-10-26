@@ -29,6 +29,7 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: '1'
           HOMEBREW_NO_ANALYTICS: '1'
         run: |
+          brew trust --formula hudson-frontier/tap/hudson
           brew style hudson-frontier/tap/hudson
           brew audit --strict --formula hudson-frontier/tap/hudson
           brew install --force-bottle hudson-frontier/tap/hudson

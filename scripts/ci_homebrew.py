@@ -42,6 +42,7 @@ def main() -> None:
     run('git', '-C', tap, 'add', 'Formula/hudson.rb')
     run('git', '-C', tap, 'commit', '-m', 'Build the qualified Hudson formula')
     run('git', '-C', tap, 'remote', 'add', 'origin', 'https://github.com/hudson-frontier/homebrew-tap')
+    run('brew', 'trust', '--formula', homebrew.FORMULA)
     run('brew', 'style', homebrew.FORMULA)
     run('brew', 'audit', '--strict', '--formula', homebrew.FORMULA)
     run('brew', 'install', '--build-bottle', '--verbose', homebrew.FORMULA)
