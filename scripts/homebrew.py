@@ -212,7 +212,9 @@ def compose(directory: Path, output: Path, commit: str, version: str, ci_run: st
     tap = output / 'tap'
     shutil.copytree(package.ROOT / 'packaging/homebrew/tap', tap)
     (tap / 'Formula').mkdir()
-    package.publish_checksum(tap / 'Formula/hudson.rb', formula)
+    formula_path = tap / 'Formula/hudson.rb'
+    package.publish_checksum(formula_path, formula)
+    formula_path.chmod(0o644)
     shutil.copyfile(package.ROOT / 'LICENSE', tap / 'LICENSE')
     bottles = output / 'bottles'
     bottles.mkdir()

@@ -1,6 +1,7 @@
 """Source and native bottle qualification; no live publication or Homebrew needed."""
 import io
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -147,7 +148,11 @@ class HomebrewTests(unittest.TestCase):
         candidates = self.candidates()
         output = self.root / 'ready'
         homebrew.compose(candidates, output, self.commit, self.version, '123')
-        formula = (output / 'tap/Formula/hudson.rb').read_text()
+        formula_path = output / 'tap/Formula/hudson.rb'
+        if os.name == 'posix':
+            self.assertEqual(formula_path.stat().st_mode & 0o777, 0o644)
+            self.assertEqual(output.stat().st_mode & 0o777, 0o700)
+        formula = formula_path.read_text()
         lines = [line for line in formula.splitlines() if line.strip().startswith('sha256 cellar:')]
         self.assertEqual(len(lines), 2)
         for expression in [r'\b(?:arm64_sequoia|x86_64_linux):', r'"[0-9a-f]{64}"']:
