@@ -21,10 +21,11 @@ outside the sandbox async runtime.
 The initial agent adapter comes from Hudson revision
 `44e81c64a43cadf61cefe42b077e7eb6997c7875`; the sandbox adapter comes from Hudsonbox
 revision `df4b53cb8e3e22bd808b0e61f25ac43f3eaeb976`. Their Apache-2.0 attribution
-is retained in NOTICE. The original product binaries remain intact during this
-handoff. Changes made to either copy during the transition need coordination with
-the CLI team; backend repositories can later replace their adapters with thin
-compatibility shims after validating a released CLI dependency.
+is retained in NOTICE. This repository owns the public operator commands and
+their compatibility executables. Backend repositories own the service binaries,
+SDKs and private protocol test fixtures. Service installation must not replace
+the public `hudson`, `hudson-cli` or `hudsonbox` executables; install Hudson CLI
+separately to operate those services.
 
 ## Compatibility
 

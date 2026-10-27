@@ -30,6 +30,7 @@ async fn cli_input(binary: &str, args: &[&str], input: Option<&[u8]>, code: i32)
         .args(args)
         .kill_on_drop(true)
         .env_remove("HUDSONBOX_CONFIG")
+        .env_remove("HUDSON_TEST_MISSING_AGENT_TOKEN")
         .env_remove("HTTP_PROXY")
         .env_remove("HTTPS_PROXY")
         .env_remove("ALL_PROXY")
@@ -220,61 +221,145 @@ impl Server {
 }
 
 #[tokio::test]
-async fn authenticated_loopback_http_ignores_environment_proxies() {
+async fn loopback_http_ignores_environment_proxies_with_and_without_authentication() {
     for binary in [HUDSON, AGENT] {
         for proxy_variable in ["http_proxy", "all_proxy"] {
             for hostname in ["127.0.0.1", "localhost"] {
-                let destination = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
-                let proxy = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
-                let url = destination.url.replace("127.0.0.1", hostname);
-                let mut command = tokio::process::Command::new(binary_path(binary));
-                command.kill_on_drop(true);
-                if binary == HUDSON {
-                    command.arg("agent");
+                for authenticated in [false, true] {
+                    let destination = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+                    let proxy = Server::http(vec![Reply::ok(json!({"ok": true}))]).await;
+                    let url = destination.url.replace("127.0.0.1", hostname);
+                    let mut command = tokio::process::Command::new(binary_path(binary));
+                    command.kill_on_drop(true);
+                    if binary == HUDSON {
+                        command.arg("agent");
+                    }
+                    command.args(["--url", &url]);
+                    if authenticated {
+                        command.args(["--api-token-env", "HUDSON_PROXY_TEST_TOKEN"]);
+                    }
+                    command.arg("health");
+                    for name in [
+                        "HTTP_PROXY",
+                        "HTTPS_PROXY",
+                        "ALL_PROXY",
+                        "NO_PROXY",
+                        "http_proxy",
+                        "https_proxy",
+                        "all_proxy",
+                        "no_proxy",
+                    ] {
+                        command.env_remove(name);
+                    }
+                    command.env(proxy_variable, &proxy.url);
+                    command.env("HUDSON_PROXY_TEST_TOKEN", "fixture-private-token");
+                    let output = tokio::time::timeout(Duration::from_secs(15), command.output())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert!(
+                        output.status.success(),
+                        "{}",
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                    assert!(
+                        proxy.requests.lock().unwrap().is_empty(),
+                        "loopback request reached proxy"
+                    );
+                    let requests = destination.requests.lock().unwrap();
+                    assert_eq!(requests.len(), 1);
+                    assert_eq!(requests[0].path, "/health");
+                    assert_eq!(
+                        requests[0].headers.get("authorization").map(String::as_str),
+                        authenticated.then_some("Bearer fixture-private-token")
+                    );
                 }
-                command.args([
-                    "--url",
-                    &url,
-                    "--api-token-env",
-                    "HUDSON_PROXY_TEST_TOKEN",
-                    "health",
-                ]);
-                for name in [
-                    "HTTP_PROXY",
-                    "HTTPS_PROXY",
-                    "ALL_PROXY",
-                    "NO_PROXY",
-                    "http_proxy",
-                    "https_proxy",
-                    "all_proxy",
-                    "no_proxy",
-                ] {
-                    command.env_remove(name);
-                }
-                command.env(proxy_variable, &proxy.url);
-                command.env("HUDSON_PROXY_TEST_TOKEN", "fixture-private-token");
-                let output = tokio::time::timeout(Duration::from_secs(15), command.output())
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert!(
-                    output.status.success(),
-                    "{}",
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                assert!(
-                    proxy.requests.lock().unwrap().is_empty(),
-                    "loopback request reached proxy"
-                );
-                let requests = destination.requests.lock().unwrap();
-                assert_eq!(requests.len(), 1);
-                assert_eq!(requests[0].path, "/health");
-                assert_eq!(
-                    requests[0].headers["authorization"],
-                    "Bearer fixture-private-token"
-                );
             }
         }
+    }
+}
+
+#[tokio::test]
+async fn agent_base_urls_reject_ambiguous_components_before_any_request() {
+    for binary in [HUDSON, AGENT] {
+        let server = Server::http(vec![Reply::ok(json!({"ok":true}))]).await;
+        let authority = server.url.strip_prefix("http://").unwrap();
+        for url in [
+            format!("http://fixture-private-token@{authority}"),
+            format!("http://user:fixture-private-token@{authority}"),
+            format!("http://fixture%2Dprivate%2Dtoken@{authority}"),
+            format!("{}?token=fixture%2Dprivate%2Dtoken", server.url),
+            format!("{}#fixture%2Dprivate%2Dtoken", server.url),
+            format!("{}?", server.url),
+            format!("{}#", server.url),
+            format!("ftp://{authority}"),
+            "file:///fixture-private-token".to_owned(),
+        ] {
+            for authenticated in [false, true] {
+                let mut args = vec!["--url", &url, "--json", "health"];
+                if authenticated {
+                    args.splice(2..2, ["--api-token-env", "HUDSON_TEST_MISSING_AGENT_TOKEN"]);
+                }
+                if binary == HUDSON {
+                    args.insert(0, "agent");
+                }
+                let output = cli(binary, &args, 1).await;
+                assert!(output.stdout.is_empty());
+                let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+                assert_eq!(error["error"], "client");
+                assert!(error["message"].as_str().unwrap().contains("API URL"));
+                assert!(server.requests.lock().unwrap().is_empty());
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn agent_bearer_tokens_still_require_https_or_loopback_http() {
+    for (url, expected) in [
+        ("http://192.0.2.1", "requires HTTPS or loopback HTTP"),
+        ("https://192.0.2.1", "environment variable is missing"),
+        ("http://127.0.0.1", "environment variable is missing"),
+        ("http://localhost", "environment variable is missing"),
+        ("http://[::1]", "environment variable is missing"),
+    ] {
+        let output = cli(
+            HUDSON,
+            &[
+                "agent",
+                "--url",
+                url,
+                "--api-token-env",
+                "HUDSON_TEST_MISSING_AGENT_TOKEN",
+                "--json",
+                "health",
+            ],
+            1,
+        )
+        .await;
+        assert!(output.stdout.is_empty());
+        let error: Value = serde_json::from_slice(&output.stderr).unwrap();
+        assert!(error["message"].as_str().unwrap().contains(expected));
+    }
+}
+
+#[tokio::test]
+async fn agent_base_urls_preserve_encoded_path_prefixes_and_normalize_the_origin() {
+    for binary in [HUDSON, AGENT] {
+        let server = Server::http(vec![Reply::ok(json!({"ok":true}))]).await;
+        let url = format!(
+            "{}/gateway%3Fpart%23one/",
+            server.url.replace("http://", "HTTP://")
+        );
+        let mut args = vec!["--url", &url, "health"];
+        if binary == HUDSON {
+            args.insert(0, "agent");
+        }
+        cli(binary, &args, 0).await;
+        let requests = server.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0].path, "/gateway%3Fpart%23one/health");
+        assert!(!requests[0].headers.contains_key("authorization"));
     }
 }
 
@@ -504,6 +589,51 @@ async fn agent_namespace_and_legacy_commands_preserve_requests() {
     assert_eq!(requests[2].path, "/agents/analyst/versions/7");
     assert!(!requests[0].headers.contains_key("authorization"));
     assert_eq!(requests.len(), 4);
+}
+
+#[tokio::test]
+async fn agent_schedule_reads_preserve_publication_state_and_legacy_definition_lookup() {
+    for binary in [HUDSON, AGENT] {
+        for (status, last_attempt_at, published_at) in [
+            ("unscheduled", Value::Null, Value::Null),
+            ("pending", json!(1793122080000_u64), Value::Null),
+            (
+                "published",
+                json!(1793122080000_u64),
+                json!(1793122081000_u64),
+            ),
+        ] {
+            let body = json!({"root_run_id":RUN,"status":status,
+                "last_attempt_at":last_attempt_at,"published_at":published_at});
+            let server = Server::http(vec![Reply::ok(body.clone())]).await;
+            let mut args = vec!["--url", &server.url, "schedule", RUN];
+            if binary == HUDSON {
+                args.insert(0, "agent");
+            }
+            let output = cli(binary, &args, 0).await;
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                body
+            );
+            assert!(output.stderr.is_empty());
+            let requests = server.requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].method, "GET");
+            assert_eq!(requests[0].path, format!("/runs/{RUN}/schedule"));
+            assert_eq!(requests[0].body, Value::Null);
+        }
+    }
+    let body = json!({"id":"schedule","version":7});
+    let server = Server::http(vec![Reply::ok(body.clone())]).await;
+    let output = cli(HUDSON, &["--url", &server.url, "agent", "schedule", "7"], 0).await;
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        body
+    );
+    assert_eq!(
+        server.requests.lock().unwrap()[0].path,
+        "/agents/schedule/versions/7"
+    );
 }
 
 #[tokio::test]

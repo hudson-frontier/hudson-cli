@@ -20,10 +20,12 @@ or secret manager. The argument names an environment variable, not its value:
 hudson agent --url https://agent.example.com --api-token-env HUDSON_API_TOKEN health
 ```
 
-Use trusted HTTPS or loopback HTTP. Authenticated URLs cannot contain user
-information, query strings or fragments. Connection options precede the operation.
+Use trusted HTTPS or loopback HTTP. API URLs cannot contain user information,
+query strings or fragments. An optional path prefix is retained when selecting
+API routes. Connection options precede the operation.
 Agent and sandbox credentials remain independent.
-Authenticated loopback HTTP connects directly and ignores proxy environment variables.
+Loopback HTTP connects directly and ignores proxy environment variables, with or
+without a bearer token. Bearer authentication requires HTTPS or loopback HTTP.
 
 ## Submit and follow
 
@@ -41,6 +43,18 @@ hudson agent follow RUN_UUID
 hudson agent events RUN_UUID --after 42
 hudson agent follow RUN_UUID --after 42
 ```
+
+For a host using an external scheduler, inspect publication separately:
+
+```console
+hudson agent schedule RUN_UUID
+```
+
+The response reports the root run's `unscheduled`, `pending` or `published` state,
+with `last_attempt_at` and `published_at` Unix timestamps in milliseconds when
+available. `pending` means scheduling is persisted but has not been acknowledged;
+`published` means the scheduler acknowledged it. Neither status establishes
+execution or completion. Inspect the run or use `follow` for its outcome.
 
 `follow` emits event and run records as NDJSON. Retain the last fully processed
 `after` value; failure diagnostics include a reconnect cursor. Observation retries
