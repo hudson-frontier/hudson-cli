@@ -118,16 +118,28 @@ fn bounded_regular_utf8_files_and_directory_listing() {
     let listing = tools
         .execute_tool("list_directory", &json!({"path":"."}))
         .unwrap();
-    assert_eq!(
-        listing["entries"].as_array().unwrap().len(),
-        4 + usize::from(cfg!(target_os = "linux"))
-    );
-    assert_eq!(listing["truncated"], false);
-    assert!(listing["entries"]
+    let entries: Vec<_> = listing["entries"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|entry| entry["name"] == "directory" && entry["directory"] == true));
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap(),
+                entry["directory"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        entries,
+        [
+            ("binary", false),
+            ("directory", true),
+            ("fifo", false),
+            ("large", false),
+            ("socket", false),
+        ]
+    );
+    assert_eq!(listing["truncated"], false);
 }
 
 #[test]

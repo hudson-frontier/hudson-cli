@@ -323,6 +323,47 @@ def git(*args: str) -> str:
                                     '-C', str(ROOT), *args], text=True).strip()
 
 
+def supplemental_license_notices(item: dict, directory: Path) -> str:
+    """Use reviewed upstream bytes only for the exact published crate identity."""
+    folder = ROOT / 'packaging/licenses'
+    manifest = json.loads((folder / 'manifest.json').read_text(encoding='utf-8'))
+    if manifest.get('schema') != 1:
+        raise ValueError('Unsupported supplemental license manifest')
+    entries = [entry for entry in manifest['packages']
+               if (entry['name'], entry['version']) == (item['name'], item['version'])]
+    if len(entries) != 1:
+        raise ValueError(f'Missing dependency license text: {item["name"]} {item["version"]}')
+    entry = entries[0]
+    vcs_path = directory / '.cargo_vcs_info.json'
+    if vcs_path.is_symlink() or not vcs_path.is_file() or vcs_path.stat().st_size > 16384:
+        raise ValueError('Missing or invalid crate VCS provenance')
+    vcs = json.loads(vcs_path.read_text(encoding='utf-8'))
+    if (item.get('source') != 'registry+https://github.com/rust-lang/crates.io-index'
+            or item.get('repository') != entry['repository']
+            or item.get('license') != entry['license']
+            or not re.fullmatch(r'[0-9a-f]{40}', entry['vcs'])
+            or vcs.get('git', {}).get('sha1') != entry['vcs']
+            or vcs.get('git', {}).get('dirty', False)
+            or vcs.get('path_in_vcs') != entry['path_in_vcs']):
+        raise ValueError('Supplemental license does not match the published crate provenance')
+    if not entry['files']:
+        raise ValueError('Supplemental license text is missing')
+    notices = []
+    for notice in entry['files']:
+        path = folder / notice['path']
+        if (not path.resolve().is_relative_to(folder.resolve()) or path.is_symlink()
+                or not path.is_file() or path.stat().st_size > MAX_METADATA_BYTES):
+            raise ValueError('Invalid supplemental license path or size')
+        data = path.read_bytes()
+        if not data or digest(data) != notice['sha256']:
+            raise ValueError('Supplemental license checksum mismatch')
+        if not notice['source'].startswith(entry['repository'] + '/blob/' + entry['vcs'] + '/'):
+            raise ValueError('Supplemental license source must use the exact upstream revision')
+        notices.append(f'\n--- {path.name} ---\nUpstream source: {notice["source"]}\n'
+                       f'SHA-256: {notice["sha256"]}\n\n{data.decode("utf-8")}\n')
+    return ''.join(notices)
+
+
 def dependency_notices(target: str) -> bytes:
     metadata = json.loads(subprocess.check_output(
         ['cargo', 'metadata', '--locked', '--format-version', '1', '--filter-platform', target],
@@ -347,17 +388,22 @@ def dependency_notices(target: str) -> bytes:
         if item.get('license_file'):
             path = Path(item['license_file'])
             license_files.append(path if path.is_absolute() else directory / path)
-        for base in [directory, *list(directory.parents)[:2]]:
+        # Registry siblings do not share a license directory. Git workspace
+        # crates may inherit the license from their checked-out repository root.
+        bases = [directory] if (item.get('source') or '').startswith('registry+') else [
+            directory, *list(directory.parents)[:2]]
+        for base in bases:
             found = [path for path in base.iterdir() if path.is_file() and
                      path.name.upper().startswith(('LICENSE', 'COPYING', 'NOTICE'))]
             if found:
                 license_files.extend(found)
                 break
         license_files = sorted(set(license_files))
-        if not license_files:
-            raise ValueError(f'Missing dependency license text: {item["name"]} {item["version"]}')
         sections.append(f'\n{"=" * 72}\n{item["name"]} {item["version"]}\n'
                         f'License expression: {item.get("license") or "see license text"}\n')
+        if not license_files:
+            sections.append(supplemental_license_notices(item, directory))
+            continue
         for path in license_files:
             if path.stat().st_size > 1024 * 1024:
                 raise ValueError('Unexpected dependency license size')
