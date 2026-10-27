@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn namespaces_do_not_shadow_historical_agent_definition_names() {
-        for name in ["analyst", "get", "health", "start", "session"] {
+        for name in ["analyst", "get", "health", "start", "session", "schedule"] {
             let args = ["hudson", "agent", name, "7"].map(OsString::from);
             assert!(matches!(
                 parse(&args),
@@ -192,5 +192,21 @@ mod tests {
         ]
         .map(OsString::from);
         assert!(matches!(parse(&args), Ok(Invocation::Product(_))));
+        let args = [
+            "hudson",
+            "agent",
+            "schedule",
+            "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        ]
+        .map(OsString::from);
+        assert!(matches!(
+            parse(&args),
+            Ok(Invocation::Product(Cli {
+                product: Product::Agent(agent::commands::Args {
+                    command: Some(agent::commands::Command::Schedule { .. }),
+                    ..
+                }),
+            }))
+        ));
     }
 }
