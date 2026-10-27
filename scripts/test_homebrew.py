@@ -103,6 +103,18 @@ class HomebrewTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             homebrew.archive_tree(archive({'one/file': b'x', 'two/file': b'x'}), prefixed=True)
 
+    def test_source_metadata_is_bounded_before_tar_parsing(self):
+        for mode in ('w', 'w:gz'):
+            data = io.BytesIO()
+            with tarfile.open(fileobj=data, mode=mode, format=tarfile.PAX_FORMAT) as output:
+                entry = tarfile.TarInfo('root/guide.md')
+                entry.size = 1
+                entry.pax_headers = {'comment': 'x' * 2048}
+                output.addfile(entry, io.BytesIO(b'x'))
+            with self.subTest(mode=mode), patch.object(package, 'MAX_METADATA_BYTES', 1024):
+                with self.assertRaises(ValueError):
+                    homebrew.archive_tree(data.getvalue(), prefixed=True)
+
     def test_formula_inputs_cannot_select_moving_refs_or_inject_ruby(self):
         for commit, version, digest in [('main', self.version, self.source_sha),
                                         (self.commit, '0.1.1-rc1', self.source_sha),

@@ -71,6 +71,16 @@ aliases, reserved filename characters and nonprinting Unicode before creating
 an installation directory.
 Original ZIP names are validated as well as the paths used for extraction.
 
+Container parsing permits at most 256 members and 1 MiB of parsed metadata,
+including ZIP directories and extended TAR headers. The member limit also counts
+ignored directory entries.
+Payload reads retain the 1 GiB total expansion limit. ZIP members must use stored
+or deflate compression; the reader bounds decompression even when advertised
+member sizes are incorrect.
+Release manifests exceeding 1 MiB are rejected before reading their payloads.
+Homebrew source comparison uses the same metadata budget for both downloaded
+gzip archives and uncompressed Git archives, alongside its 32 MiB source limit.
+
 ## Publish
 
 After the authorized release is ready, locate the successful **CLI checks** push
