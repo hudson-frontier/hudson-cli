@@ -5,7 +5,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
 };
 
 fn private_directory_metadata(metadata: &fs::Metadata) -> Result<(), Error> {
@@ -18,12 +18,20 @@ fn private_directory_metadata(metadata: &fs::Metadata) -> Result<(), Error> {
     Ok(())
 }
 
+fn directory_path(path: &Path) -> PathBuf {
+    // Trailing separators or `/.` make no-follow checks resolve through a
+    // final symlink. Strip those lexical components, retaining ParentDir and
+    // ancestor aliases; canonicalization would follow the link before checking.
+    path.components().collect()
+}
+
 pub(super) fn private_directory(path: &Path) -> Result<(), Error> {
+    let path = directory_path(path);
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(path)?;
-    private_directory_metadata(&fs::symlink_metadata(path)?)
+        .create(&path)?;
+    private_directory_metadata(&fs::symlink_metadata(&path)?)
 }
 
 fn private_file_metadata(metadata: &fs::Metadata) -> Result<(), Error> {
@@ -58,7 +66,7 @@ impl Directory {
         let file = OpenOptions::new()
             .read(true)
             .custom_flags((OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::NONBLOCK).bits() as i32)
-            .open(path)?;
+            .open(directory_path(path))?;
         Self::from_file(file)
     }
 
@@ -155,6 +163,53 @@ impl Drop for Staged<'_> {
     fn drop(&mut self) {
         if !self.published {
             let _ = rustix::fs::unlinkat(self.directory, self.name.as_str(), AtFlags::empty());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn final_state_aliases_are_rejected_with_trailing_separators_or_dot() {
+        let temporary = tempfile::tempdir().unwrap();
+        let real = temporary.path().join("real");
+        fs::create_dir(&real).unwrap();
+        fs::set_permissions(&real, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::write(real.join("untouched"), b"preserve me").unwrap();
+        let alias = temporary.path().join("alias");
+        symlink(&real, &alias).unwrap();
+        for suffix in ["", "/", "/.", "//./"] {
+            let mut name = alias.as_os_str().to_os_string();
+            name.push(suffix);
+            let path = std::path::PathBuf::from(name);
+            assert!(private_directory(&path).is_err(), "accepted alias{suffix}");
+            assert!(Directory::open(&path).is_err(), "opened alias{suffix}");
+
+            let mut name = real.as_os_str().to_os_string();
+            name.push(suffix);
+            let path = std::path::PathBuf::from(name);
+            private_directory(&path).unwrap();
+            Directory::open(&path).unwrap();
+        }
+        assert_eq!(fs::read(real.join("untouched")).unwrap(), b"preserve me");
+        assert_eq!(fs::read_dir(real).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn ancestor_aliases_and_parent_directory_components_remain_supported() {
+        let temporary = tempfile::tempdir().unwrap();
+        let real = temporary.path().join("real");
+        private_directory(&real).unwrap();
+        private_directory(&real.join("child")).unwrap();
+        let alias = temporary.path().join("alias");
+        symlink(&real, &alias).unwrap();
+        for path in [alias.join("./child/../child/."), alias.join("child/..")] {
+            private_directory(&path).unwrap();
+            let directory = Directory::open(&path).unwrap();
+            assert!(directory.0.metadata().unwrap().is_dir());
         }
     }
 }
