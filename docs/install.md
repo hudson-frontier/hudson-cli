@@ -5,8 +5,8 @@ database or virtual machine. Obtain the service URL and credentials separately.
 
 The local terminal agent is currently available in development builds. It needs
 Linux or macOS, a terminal, an Anthropic credential and ripgrep (`rg`) for search.
-Use WSL on Windows. Homebrew installs ripgrep; manual and Cargo installations need
-it separately on PATH outside the workspace. Published v0.1.1 archives provide
+Use WSL on Windows. Install ripgrep separately for source builds, for example
+with `brew install ripgrep`, and keep it on PATH outside the workspace. Published v0.1.1 archives provide
 the API and sandbox commands. See [local execution](local-agent.md) before
 building the current source.
 

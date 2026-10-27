@@ -22,8 +22,8 @@ uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 rustix = { version = "1", features = ["fs", "process"] }
-hudson-core = { git = "https://github.com/hudson-frontier/hudson.git", rev = "997e80b34aac63f10a49db1b8cc4131c41b0776f" }
-hudson-harness = { git = "https://github.com/hudson-frontier/hudson.git", rev = "997e80b34aac63f10a49db1b8cc4131c41b0776f" }
+hudson-core = { git = "https://github.com/hudson-frontier/hudson.git", rev = "1b60368fa5354f030f426f60ea30a7847c141003" }
+hudson-harness = { git = "https://github.com/hudson-frontier/hudson.git", rev = "1b60368fa5354f030f426f60ea30a7847c141003" }
 ratatui = "=0.29.0"
 crossterm = "=0.28.1"
 unicode-segmentation = "=1.13.3"

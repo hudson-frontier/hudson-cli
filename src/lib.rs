@@ -281,10 +281,11 @@ mod tests {
         assert!(matches!(
             parse(&args),
             Ok(Invocation::Product(Cli {
-                product: Product::Agent(agent::commands::Args {
+                product: Some(Product::Agent(agent::commands::Args {
                     command: Some(agent::commands::Command::Schedule { .. }),
                     ..
-                }),
+                })),
+                ..
             }))
         ));
     }

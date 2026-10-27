@@ -1,0 +1,297 @@
+{
+  "actor": {
+    "id": "local-user",
+    "workspace_id": "11111111-1111-4111-8111-111111111111"
+  },
+  "agent": {
+    "allow_user_input": false,
+    "created_at": 0,
+    "id": "hudson-local",
+    "input_schema": null,
+    "instructions": "Source #84 migration fixture instructions.",
+    "limits": {
+      "max_batch_size": 4,
+      "max_context_bytes": 1048576,
+      "max_harness_steps": 1024,
+      "max_model_calls": 64,
+      "max_operations": 256,
+      "max_payload_bytes": 524288
+    },
+    "model": "fixture",
+    "name": "Hudson",
+    "output_schema": null,
+    "schema_version": 1,
+    "tools": [
+      {
+        "alias": "list_directory",
+        "tool_ref": {
+          "id": "list_directory",
+          "version": 1
+        }
+      },
+      {
+        "alias": "read_file",
+        "tool_ref": {
+          "id": "read_file",
+          "version": 1
+        }
+      },
+      {
+        "alias": "search",
+        "tool_ref": {
+          "id": "search",
+          "version": 1
+        }
+      },
+      {
+        "alias": "write_file",
+        "tool_ref": {
+          "id": "write_file",
+          "version": 1
+        }
+      },
+      {
+        "alias": "edit_file",
+        "tool_ref": {
+          "id": "edit_file",
+          "version": 1
+        }
+      },
+      {
+        "alias": "shell",
+        "tool_ref": {
+          "id": "shell",
+          "version": 1
+        }
+      }
+    ],
+    "version": 1,
+    "workspace_id": "11111111-1111-4111-8111-111111111111"
+  },
+  "tools": [
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "List a directory in this workspace. Output is bounded and indicates truncation.",
+      "effect": "read",
+      "execution": {
+        "key": "list_directory",
+        "type": "registered"
+      },
+      "id": "list_directory",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "list_directory",
+      "output_schema": null,
+      "policy_ref": "local-read",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "Read a UTF-8 workspace file up to 64 KiB; returns its digest for safe replacement.",
+      "effect": "read",
+      "execution": {
+        "key": "read_file",
+        "type": "registered"
+      },
+      "id": "read_file",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      },
+      "name": "read_file",
+      "output_schema": null,
+      "policy_ref": "local-read",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "Search workspace file contents with ripgrep. Ignores ignored files; no symlink following. Use list_directory to explore.",
+      "effect": "read",
+      "execution": {
+        "key": "search",
+        "type": "registered"
+      },
+      "id": "search",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      },
+      "name": "search",
+      "output_schema": null,
+      "policy_ref": "local-read",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "Create a UTF-8 file or replace it. Replacing requires expected_digest from read_file; parent directory must exist.",
+      "effect": "write",
+      "execution": {
+        "key": "write_file",
+        "type": "registered"
+      },
+      "id": "write_file",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 65536,
+            "type": "string"
+          },
+          "expected_digest": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "write_file",
+      "output_schema": null,
+      "policy_ref": "local-write",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "Replace one unique exact old_text occurrence in a workspace UTF-8 file. Read the file first; unrelated content is preserved.",
+      "effect": "write",
+      "execution": {
+        "key": "edit_file",
+        "type": "registered"
+      },
+      "id": "edit_file",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "new_text": {
+            "maxLength": 65536,
+            "type": "string"
+          },
+          "old_text": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "old_text",
+          "new_text"
+        ],
+        "type": "object"
+      },
+      "name": "edit_file",
+      "output_schema": null,
+      "policy_ref": "local-write",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "created_at": 0,
+      "credential_ref": null,
+      "description": "Execute a POSIX shell command with workspace cwd and the user's OS permissions. No filesystem sandbox. Timeout 1..120 seconds; output is bounded. Background jobs are not retained. Nonzero exit is evidence of failure, not success.",
+      "effect": "write",
+      "execution": {
+        "key": "shell",
+        "type": "registered"
+      },
+      "id": "shell",
+      "input_schema": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 65536,
+            "minLength": 1,
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "maximum": 120,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "type": "object"
+      },
+      "name": "shell",
+      "output_schema": null,
+      "policy_ref": "local-write",
+      "schema_version": 1,
+      "version": 1,
+      "workspace_id": "11111111-1111-4111-8111-111111111111"
+    }
+  ],
+  "source": {
+    "repository": "https://github.com/hudson-frontier/hudson",
+    "pull_request": 84,
+    "commit": "9b5255521b893452ad633f83ed04632758eb1df5",
+    "tools_path": "crates/hudson-cli/src/local/tools.rs",
+    "tools_git_blob": "df7d9c74b32ec9ac757caa25f21ffd3835531777",
+    "tools_sha256": "3d1d8fd52340619c19a8939ce72703ddee3d2cce503ddda41d0a00233f1cad09",
+    "host_path": "crates/hudson-cli/src/local/mod.rs",
+    "host_git_blob": "8086293aaa4a29d6aef33cbab5959b298a26f741",
+    "host_sha256": "372046087f9e3e36c6f4d6464f4f449e69b49739e4e07a15a660368831145e91",
+    "generation": "Compiled original tools.rs and verbatim Agent initializer from original mod.rs against hudson-core at the original commit; only workspace/model/instructions use fixed fixture values."
+  }
+}

@@ -31,8 +31,11 @@ TARGETS = {
 BINARIES = ('hudson', 'hudson-cli', 'hudsonbox')
 SHELL_FILES = {'bash': 'hudson.bash', 'zsh': '_hudson', 'fish': 'hudson.fish',
                'powershell': 'hudson.ps1', 'elvish': 'hudson.elv'}
-REQUIRED_DOCS = ('install.md', 'agent.md', 'local-agent.md', 'sandbox.md', 'automation.md',
+REQUIRED_DOCS = ('install.md', 'agent.md', 'sandbox.md', 'automation.md',
                  'troubleshooting.md', 'reference.md', 'releasing.md', 'homebrew.md')
+# Schema 1 archives from earlier releases retain their original required set.
+# New source builds must also ship the local-host guide.
+CURRENT_DOCS = (*REQUIRED_DOCS, 'local-agent.md')
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
 MAX_METADATA_BYTES = 1024 * 1024
@@ -364,6 +367,10 @@ def dependency_notices(target: str) -> bytes:
 
 def build(target: str, binary_dir: Path, output: Path, allow_dirty: bool = False) -> Path:
     release_version = version()
+    for name in CURRENT_DOCS:
+        guide = ROOT / 'docs' / name
+        if not guide.is_file() or guide.is_symlink():
+            raise ValueError('Missing regular release guide: ' + name)
     commit = git('rev-parse', 'HEAD')
     dirty = bool(git('status', '--porcelain', '--untracked-files=normal'))
     if dirty and not allow_dirty:

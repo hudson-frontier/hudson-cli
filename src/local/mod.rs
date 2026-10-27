@@ -108,6 +108,7 @@ fn instructions(root: &Path, tools: &tools::LocalTools) -> Result<String, Error>
         text.push_str(&instructions);
     }
     text.push_str("\nRead any applicable nested AGENTS.md files before modifying files in those directories.\n");
+    text.push_str("Workspace file tools reject symbolic links and parent traversal. Use paths within the selected workspace; shell commands retain the user's OS permissions and follow the selected approval policy.\n");
     Ok(text)
 }
 impl Host {

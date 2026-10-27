@@ -11,9 +11,13 @@ configured remote agent and `hudson sandbox` for Hudsonbox.
 ## Start
 
 Build the current source with Rust 1.92.0 and install ripgrep (`rg`) for workspace
-search. Homebrew installs ripgrep as a runtime dependency; manual archive and
-Cargo installations need `rg` on PATH outside the workspace. Python 3 is needed
+search, for example with `brew install ripgrep`. Source installations need `rg`
+on PATH outside the workspace. Python 3 is needed
 only when a task or validation command uses it.
+
+This repository's development Homebrew formula declares ripgrep for future
+packaging. The published v0.1.1 tap formula does not install this local-agent
+prerequisite.
 
 Provide `ANTHROPIC_API_KEY` through your shell or secret manager, then run
 `hudson` in your project. The local host currently uses Anthropic Messages

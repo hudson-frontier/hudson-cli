@@ -924,7 +924,7 @@ dependencies = [
 [[package]]
 name = "hudson-core"
 version = "0.1.0"
-source = "git+https://github.com/hudson-frontier/hudson.git?rev=997e80b34aac63f10a49db1b8cc4131c41b0776f#997e80b34aac63f10a49db1b8cc4131c41b0776f"
+source = "git+https://github.com/hudson-frontier/hudson.git?rev=1b60368fa5354f030f426f60ea30a7847c141003#1b60368fa5354f030f426f60ea30a7847c141003"
 dependencies = [
  "futures",
  "getrandom 0.4.3",
@@ -949,7 +949,7 @@ dependencies = [
 [[package]]
 name = "hudson-harness"
 version = "0.1.0"
-source = "git+https://github.com/hudson-frontier/hudson.git?rev=997e80b34aac63f10a49db1b8cc4131c41b0776f#997e80b34aac63f10a49db1b8cc4131c41b0776f"
+source = "git+https://github.com/hudson-frontier/hudson.git?rev=1b60368fa5354f030f426f60ea30a7847c141003#1b60368fa5354f030f426f60ea30a7847c141003"
 dependencies = [
  "serde",
  "serde_json",

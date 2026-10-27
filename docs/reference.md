@@ -8,19 +8,44 @@ does not load service credentials. See the task guides for complete workflows.
 ```text
 Command-line interface for Hudson products
 
-Usage: hudson <COMMAND>
+Usage: hudson [OPTIONS]
+       hudson <COMMAND>
 
 Commands:
+  local       Run the local terminal agent in this workspace (Unix; use WSL on Windows)
   agent       Connect to the Hudson agent API
   sandbox     Manage Hudsonbox sandboxes through the project HTTPS API
   completion  Print a shell completion script without connecting to a service
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help     Print help
-  -V, --version  Print version
+      --workspace <WORKSPACE>    Workspace for the local agent (defaults to the current directory)
+      --resume <RESUME>          Resume a saved local session UUID in the same workspace
+      --provider <PROVIDER>      Local model provider (currently anthropic)
+      --model <MODEL>
+      --endpoint <ENDPOINT>      Full Anthropic Messages URL; HTTP is allowed only on loopback
+      --permission <PERMISSION>  Local execution policy. Full access uses your OS permissions [possible values: read-only, ask, full-access]
+  -h, --help                     Print help
+  -V, --version                  Print version
 
-Legacy agent commands remain available at the root. Use hudson-cli --help for their full list.
+Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson-cli --help lists them.
+```
+
+## hudson local
+
+```text
+Run the local terminal agent in this workspace (Unix; use WSL on Windows)
+
+Usage: hudson local [OPTIONS]
+
+Options:
+      --workspace <WORKSPACE>    Workspace for the local agent (defaults to the current directory)
+      --resume <RESUME>          Resume a saved local session UUID in the same workspace
+      --provider <PROVIDER>      Local model provider (currently anthropic)
+      --model <MODEL>
+      --endpoint <ENDPOINT>      Full Anthropic Messages URL; HTTP is allowed only on loopback
+      --permission <PERMISSION>  Local execution policy. Full access uses your OS permissions [possible values: read-only, ask, full-access]
+  -h, --help                     Print help
 ```
 
 ## hudson agent

@@ -524,3 +524,130 @@ fn project_instructions_use_the_same_pinned_workspace_as_runtime_tools() {
     assert!(loaded.contains("original project instructions"));
     assert!(!loaded.contains("outside instructions must not be loaded"));
 }
+
+#[test]
+fn source84_catalog_and_saved_conversation_reopen_without_changing_receipts_or_replaying_tools() {
+    #[derive(Deserialize)]
+    struct LegacyCatalog {
+        actor: Actor,
+        agent: Agent,
+        tools: Vec<Tool>,
+    }
+    let catalog: LegacyCatalog =
+        serde_json::from_str(include_str!("../../tests/fixtures/source84-catalog.json")).unwrap();
+    let root = Directory::new();
+    let state = Directory::new();
+    let directory = SessionDirectory::open(&state.0).unwrap();
+    let store = Store::local_file_in(directory.file(), "state.json").unwrap();
+    for name in ["local-read", "local-write"] {
+        store
+            .ensure_policy(
+                &catalog.actor.workspace_id,
+                name,
+                Policy {
+                    actors: [catalog.actor.id.clone()].into(),
+                    approvers: [catalog.actor.id.clone()].into(),
+                    require_approval: false,
+                },
+            )
+            .unwrap();
+    }
+    for tool in catalog.tools {
+        store.ensure_tool(tool).unwrap();
+    }
+    store.ensure_agent(catalog.agent.clone()).unwrap();
+    let session = Session {
+        schema_version: 1,
+        id: Uuid::parse_str(&catalog.actor.workspace_id).unwrap(),
+        workspace: root.0.clone(),
+        permission: Permission::FullAccess,
+        model: catalog.agent.model,
+        endpoint: "http://127.0.0.1:1".into(),
+        instructions: catalog.agent.instructions,
+        turns: vec![],
+    };
+    // The independently generated source84 catalog must match immutable v1
+    // definitions before a local host can reopen it.
+    let mut original = build_host(
+        session,
+        directory,
+        store,
+        Box::new(Script {
+            responses: vec![
+                tool("shell", json!({"command":"printf x >> count"})),
+                ModelResponse::Final {
+                    output: json!("legacy turn complete"),
+                },
+            ]
+            .into(),
+            follow_up: false,
+        }),
+    )
+    .unwrap();
+    original.prompt("Legacy task".into()).unwrap();
+    original.drive(&mpsc::channel().1).unwrap();
+    let old_run = original.active().unwrap();
+    assert_eq!(
+        original
+            .runtime
+            .store
+            .inspect(&original.actor, old_run)
+            .unwrap()
+            .status,
+        RunStatus::Completed
+    );
+    let old_receipts = serde_json::to_value(
+        original
+            .runtime
+            .store
+            .operations(&original.actor, old_run)
+            .unwrap(),
+    )
+    .unwrap();
+    let session = read_session(&original.directory).unwrap();
+    drop(original);
+    struct ContinuedModel;
+    impl ModelExecutor for ContinuedModel {
+        fn call(&mut self, request: &ModelRequest) -> Result<ModelResponse, ExecutionError> {
+            let history = serde_json::to_string(&request.messages).unwrap();
+            for expected in [
+                "Legacy task",
+                "legacy turn complete",
+                "Continue legacy conversation",
+            ] {
+                assert!(history.contains(expected));
+            }
+            Ok(ModelResponse::Final {
+                output: json!("continued without replay"),
+            })
+        }
+    }
+    let directory = SessionDirectory::open(&state.0).unwrap();
+    let store = Store::local_file_in(directory.file(), "state.json").unwrap();
+    let mut reopened = build_host(session, directory, store, Box::new(ContinuedModel)).unwrap();
+    reopened
+        .prompt("Continue legacy conversation".into())
+        .unwrap();
+    reopened.drive(&mpsc::channel().1).unwrap();
+    assert_eq!(fs::read_to_string(root.0.join("count")).unwrap(), "x");
+    assert_eq!(
+        serde_json::to_value(
+            reopened
+                .runtime
+                .store
+                .operations(&reopened.actor, old_run)
+                .unwrap()
+        )
+        .unwrap(),
+        old_receipts
+    );
+    assert_eq!(
+        reopened
+            .runtime
+            .store
+            .inspect(&reopened.actor, reopened.active().unwrap())
+            .unwrap()
+            .status,
+        RunStatus::Completed
+    );
+}

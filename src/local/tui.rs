@@ -45,7 +45,12 @@ struct Screen;
 impl Drop for Screen {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen, Show);
+        let _ = execute!(
+            io::stdout(),
+            DisableBracketedPaste,
+            LeaveAlternateScreen,
+            Show
+        );
     }
 }
 const HELP: &str = "Enter: submit · /steer TEXT: redirect active work · /approve or /deny: pending write · /cancel or Ctrl-C: stop · /resume: saved task · /quit: exit · PageUp/Down: scroll";
@@ -217,7 +222,12 @@ pub(super) fn run(
     let mut wrapped_key = None;
     let result = (|| -> Result<(), Error> {
         loop {
-            while let Ok(event) = receiver.try_recv() {
+            // Bound each display batch so continuous model output cannot starve
+            // keyboard input, cancellation or terminal resize handling.
+            for _ in 0..64 {
+                let Ok(event) = receiver.try_recv() else {
+                    break;
+                };
                 dirty = true;
                 match event {
                     Event::Text(text) => {

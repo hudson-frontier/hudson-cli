@@ -91,7 +91,7 @@ The local host uses Anthropic Messages and reads `ANTHROPIC_API_KEY` from the
 environment. The default policy asks before edits or shell commands. It records
 session state for explicit recovery and keeps the workspace's files in place.
 Linux and macOS are supported; use WSL on Windows. Workspace search requires
-ripgrep (`rg`), which Homebrew installs automatically.
+ripgrep (`rg`) installed separately, for example with `brew install ripgrep`.
 
 Build current source without replacing a stable installation:
 

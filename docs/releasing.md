@@ -15,11 +15,13 @@ code changes do not publish the CLI release or enable the tap.
 Before requesting publication:
 
 1. Fix confirmed functional bugs in separate PRs, with regression tests.
-2. Review README, installation, agent, sandbox, automation and recovery guides.
+2. Review README, installation, local-agent, agent API, sandbox, automation and recovery guides.
    Keep the command reference generated from current offline help.
 3. Run formatting, strict Clippy, native release builds and all target tests.
 4. Verify every archive, then rerun process tests against executables extracted
    into a fresh directory. Confirm the documented platform limits.
+   On Unix, the extracted `hudson` must pass the PTY task-and-restart fixture,
+   including actual file edits and shell verification without paid model calls.
 5. Check compatibility with the pinned product API/SDK revisions. Backend guest
    and hardware qualification belongs to the backend release, not the CLI tests.
 6. Wait for every required check on the current main revision. Publication also
