@@ -46,6 +46,7 @@ Commands:
   reply          Answer a waiting agent; reuse the key when retrying the same reply
   resume
   get
+  schedule       Inspect scheduler publication; published does not mean the run completed
   children
   operation
   events         Read one event page (default 100); continue with --after the last sequence
@@ -315,6 +316,21 @@ Options:
 
 ```text
 Usage: hudson agent get [OPTIONS] <RUN_ID>
+
+Arguments:
+  <RUN_ID>
+
+Options:
+      --json  Report execution errors as JSON on stderr. API success output is already JSON
+  -h, --help  Print help
+```
+
+## hudson agent schedule
+
+```text
+Inspect scheduler publication; published does not mean the run completed
+
+Usage: hudson agent schedule [OPTIONS] <RUN_ID>
 
 Arguments:
   <RUN_ID>

@@ -177,6 +177,9 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         Command::Get { run_id } => client
             .get(format!("{base}/runs/{}", segment(&run_id)?))
             .send()?,
+        Command::Schedule { run_id } => client
+            .get(format!("{base}/runs/{}/schedule", segment(&run_id)?))
+            .send()?,
         Command::Children { run_id } => client
             .get(format!("{base}/runs/{}/children", segment(&run_id)?))
             .send()?,

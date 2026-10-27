@@ -65,6 +65,10 @@ pub enum Command {
     Get {
         run_id: String,
     },
+    /// Inspect scheduler publication; published does not mean the run completed.
+    Schedule {
+        run_id: String,
+    },
     Children {
         run_id: String,
     },

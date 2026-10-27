@@ -42,6 +42,18 @@ hudson agent events RUN_UUID --after 42
 hudson agent follow RUN_UUID --after 42
 ```
 
+For a host using an external scheduler, inspect publication separately:
+
+```console
+hudson agent schedule RUN_UUID
+```
+
+The response reports the root run's `unscheduled`, `pending` or `published` state,
+with `last_attempt_at` and `published_at` Unix timestamps in milliseconds when
+available. `pending` means scheduling is persisted but has not been acknowledged;
+`published` means the scheduler acknowledged it. Neither status establishes
+execution or completion. Inspect the run or use `follow` for its outcome.
+
 `follow` emits event and run records as NDJSON. Retain the last fully processed
 `after` value; failure diagnostics include a reconnect cursor. Observation retries
 do not resubmit a task. Ctrl-C stops the client without cancelling the run.

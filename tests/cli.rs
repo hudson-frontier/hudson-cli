@@ -464,6 +464,51 @@ async fn agent_namespace_and_legacy_commands_preserve_requests() {
 }
 
 #[tokio::test]
+async fn agent_schedule_reads_preserve_publication_state_and_legacy_definition_lookup() {
+    for binary in [HUDSON, AGENT] {
+        for (status, last_attempt_at, published_at) in [
+            ("unscheduled", Value::Null, Value::Null),
+            ("pending", json!(1793122080000_u64), Value::Null),
+            (
+                "published",
+                json!(1793122080000_u64),
+                json!(1793122081000_u64),
+            ),
+        ] {
+            let body = json!({"root_run_id":RUN,"status":status,
+                "last_attempt_at":last_attempt_at,"published_at":published_at});
+            let server = Server::http(vec![Reply::ok(body.clone())]).await;
+            let mut args = vec!["--url", &server.url, "schedule", RUN];
+            if binary == HUDSON {
+                args.insert(0, "agent");
+            }
+            let output = cli(binary, &args, 0).await;
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+                body
+            );
+            assert!(output.stderr.is_empty());
+            let requests = server.requests.lock().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0].method, "GET");
+            assert_eq!(requests[0].path, format!("/runs/{RUN}/schedule"));
+            assert_eq!(requests[0].body, Value::Null);
+        }
+    }
+    let body = json!({"id":"schedule","version":7});
+    let server = Server::http(vec![Reply::ok(body.clone())]).await;
+    let output = cli(HUDSON, &["--url", &server.url, "agent", "schedule", "7"], 0).await;
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        body
+    );
+    assert_eq!(
+        server.requests.lock().unwrap()[0].path,
+        "/agents/schedule/versions/7"
+    );
+}
+
+#[tokio::test]
 async fn agent_api_failures_do_not_pollute_stdout() {
     for binary in [HUDSON, AGENT] {
         let server = Server::http(vec![Reply {
