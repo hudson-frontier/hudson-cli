@@ -64,23 +64,29 @@ fn segment(id: &str) -> Result<&str, Box<dyn std::error::Error>> {
     Ok(id)
 }
 pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+    let url = reqwest::Url::parse(&args.url).map_err(|_| "invalid agent API URL")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(
+            "API URL requires HTTP or HTTPS without URL credentials, query strings or fragments"
+                .into(),
+        );
+    }
+    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let direct_loopback = url.scheme() == "http" && local;
     let mut headers = reqwest::header::HeaderMap::new();
-    let mut direct_loopback = false;
     if let Some(name) = &args.api_token_env {
-        let url = reqwest::Url::parse(&args.url)?;
-        let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-        if (url.scheme() != "https" && !(url.scheme() == "http" && local))
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
+        if url.scheme() != "https" && !direct_loopback {
             return Err(
                 "authenticated API URL requires HTTPS or loopback HTTP without URL credentials"
                     .into(),
             );
         }
-        direct_loopback = url.scheme() == "http" && local;
         let token = std::env::var(name).map_err(|_| "API token environment variable is missing")?;
         if token.is_empty() {
             return Err("API token environment variable is empty".into());
@@ -99,7 +105,7 @@ pub fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         builder
     }
     .build()?;
-    let base = args.url.trim_end_matches('/');
+    let base = url.as_str().trim_end_matches('/');
     let response = match args.command.unwrap_or(Command::Session(Default::default())) {
         Command::Session(session) => return super::session::run(&client, base, session),
         Command::Follow {
