@@ -21,7 +21,13 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
-rustix = { version = "1", features = ["fs"] }
+rustix = { version = "1", features = ["fs", "process"] }
+hudson-core = { git = "https://github.com/hudson-frontier/hudson.git", rev = "997e80b34aac63f10a49db1b8cc4131c41b0776f" }
+hudson-harness = { git = "https://github.com/hudson-frontier/hudson.git", rev = "997e80b34aac63f10a49db1b8cc4131c41b0776f" }
+ratatui = "=0.29.0"
+crossterm = "=0.28.1"
+unicode-segmentation = "=1.13.3"
+unicode-width = "=0.2.0"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

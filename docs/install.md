@@ -3,6 +3,13 @@
 Release archives are standalone clients. They contain no backend service,
 database or virtual machine. Obtain the service URL and credentials separately.
 
+The local terminal agent is currently available in development builds. It needs
+Linux or macOS, a terminal, an Anthropic credential and ripgrep (`rg`) for search.
+Use WSL on Windows. Homebrew installs ripgrep; manual and Cargo installations need
+it separately on PATH outside the workspace. Published v0.1.1 archives provide
+the API and sandbox commands. See [local execution](local-agent.md) before
+building the current source.
+
 ## Homebrew
 
 Install the primary executable and shell completion with:

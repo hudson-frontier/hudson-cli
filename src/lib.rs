@@ -1,6 +1,9 @@
 //! Executable adapters for the public Hudson and Hudsonbox APIs.
 //! This crate's Rust modules are not a supported SDK surface.
 mod agent;
+#[cfg(unix)]
+mod local;
+mod local_args;
 mod sandbox;
 
 use clap::{Parser, Subcommand};
@@ -11,15 +14,20 @@ use std::{ffi::OsString, process::ExitCode};
     name = "hudson",
     version,
     about = "Command-line interface for Hudson products",
-    after_help = "Legacy agent commands remain available at the root. Use hudson-cli --help for their full list."
+    args_conflicts_with_subcommands = true,
+    after_help = "Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson-cli --help lists them."
 )]
 struct Cli {
+    #[command(flatten)]
+    local: local_args::LocalArgs,
     #[command(subcommand)]
-    product: Product,
+    product: Option<Product>,
 }
 
 #[derive(Subcommand)]
 enum Product {
+    /// Run the local terminal agent in this workspace (Unix; use WSL on Windows).
+    Local(local_args::LocalArgs),
     /// Connect to the Hudson agent API.
     Agent(agent::commands::Args),
     /// Manage Hudsonbox sandboxes through the project HTTPS API.
@@ -40,7 +48,8 @@ fn parse(args: &[OsString]) -> Result<Invocation, clap::Error> {
     // A valid historical definition lookup wins even when the definition name
     // matches a new agent operation (for example `hudson agent get 7`).
     let legacy_error = match agent::commands::Args::try_parse_from(args) {
-        Ok(legacy) => return Ok(Invocation::LegacyAgent(legacy)),
+        Ok(legacy) if args.len() > 1 => return Ok(Invocation::LegacyAgent(legacy)),
+        Ok(_) => return Cli::try_parse_from(args).map(Invocation::Product),
         Err(error) => error,
     };
     let informational = |error: &clap::Error| {
@@ -127,20 +136,58 @@ fn sandbox_execute(args: sandbox::Cli) -> ExitCode {
     }
 }
 
+fn local_execute(args: local_args::LocalArgs) -> ExitCode {
+    #[cfg(unix)]
+    {
+        match local::run(args) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("{}", agent::safe(&error.to_string()));
+                ExitCode::FAILURE
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = args;
+        eprintln!("The local terminal agent requires Unix. Run Hudson in WSL on Windows; native agent API and offline sandbox commands remain available.");
+        ExitCode::FAILURE
+    }
+}
+
 /// Unified `hudson` executable, with the existing flat agent commands retained.
 pub fn main_entry() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
+    #[cfg(unix)]
+    if let Some(error) = local::dispatch_internal(args.get(1..).unwrap_or_default()) {
+        eprintln!(
+            "{}",
+            agent::safe(&format!("cannot start local command: {error}"))
+        );
+        return ExitCode::FAILURE;
+    }
     match parse(&args).unwrap_or_else(|error| error.exit()) {
         Invocation::Product(Cli {
-            product: Product::Agent(args),
+            product: Some(Product::Agent(args)),
+            ..
         })
         | Invocation::LegacyAgent(args) => agent_execute(args),
         Invocation::Product(Cli {
-            product: Product::Sandbox(args),
+            product: Some(Product::Sandbox(args)),
+            ..
         }) => sandbox_execute(args),
         Invocation::Product(Cli {
-            product: Product::Completion { shell },
+            product: Some(Product::Completion { shell }),
+            ..
         }) => completion(shell),
+        Invocation::Product(Cli {
+            product: Some(Product::Local(args)),
+            ..
+        }) => local_execute(args),
+        Invocation::Product(Cli {
+            product: None,
+            local,
+        }) => local_execute(local),
     }
 }
 
@@ -171,6 +218,38 @@ pub fn legacy_sandbox_entry() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_defaults_and_explicit_api_sessions_remain_distinct() {
+        let args = ["hudson"].map(OsString::from);
+        assert!(matches!(
+            parse(&args),
+            Ok(Invocation::Product(Cli { product: None, .. }))
+        ));
+        let args = ["hudson", "local", "--permission", "read-only"].map(OsString::from);
+        assert!(matches!(
+            parse(&args),
+            Ok(Invocation::Product(Cli {
+                product: Some(Product::Local(local_args::LocalArgs {
+                    permission: Some(local_args::Permission::ReadOnly),
+                    ..
+                })),
+                ..
+            }))
+        ));
+        let args = ["hudson", "--url", "http://127.0.0.1:4318"].map(OsString::from);
+        assert!(matches!(parse(&args), Ok(Invocation::LegacyAgent(_))));
+        let args = ["hudson", "--json"].map(OsString::from);
+        assert!(matches!(parse(&args), Ok(Invocation::LegacyAgent(_))));
+        let args = ["hudson", "agent"].map(OsString::from);
+        assert!(matches!(
+            parse(&args),
+            Ok(Invocation::Product(Cli {
+                product: Some(Product::Agent(_)),
+                ..
+            }))
+        ));
+    }
 
     #[test]
     fn namespaces_do_not_shadow_historical_agent_definition_names() {

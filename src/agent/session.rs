@@ -24,7 +24,7 @@ impl std::error::Error for OutputFailure {
 }
 
 /// Keep untrusted display fields on one line, including ANSI and bidi controls.
-fn safe(text: &str) -> String {
+pub(crate) fn safe(text: &str) -> String {
     text.chars()
         .flat_map(|c| {
             if c.is_control()

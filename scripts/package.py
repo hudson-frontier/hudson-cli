@@ -31,7 +31,7 @@ TARGETS = {
 BINARIES = ('hudson', 'hudson-cli', 'hudsonbox')
 SHELL_FILES = {'bash': 'hudson.bash', 'zsh': '_hudson', 'fish': 'hudson.fish',
                'powershell': 'hudson.ps1', 'elvish': 'hudson.elv'}
-REQUIRED_DOCS = ('install.md', 'agent.md', 'sandbox.md', 'automation.md',
+REQUIRED_DOCS = ('install.md', 'agent.md', 'local-agent.md', 'sandbox.md', 'automation.md',
                  'troubleshooting.md', 'reference.md', 'releasing.md', 'homebrew.md')
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
 MAX_EXPANDED_BYTES = 1024 * 1024 * 1024
@@ -437,6 +437,9 @@ def install_test(archive: Path) -> None:
                         '--target', manifest['target']], cwd=ROOT, env=environment, check=True)
         if os.name == 'posix':
             subprocess.run([sys.executable, 'scripts/check_session.py', '--binary',
+                            str(Path(environment['HUDSON_TEST_BIN_DIR']) / 'hudson')],
+                           cwd=ROOT, env=environment, check=True)
+            subprocess.run([sys.executable, 'scripts/check_local_tui.py', '--binary',
                             str(Path(environment['HUDSON_TEST_BIN_DIR']) / 'hudson')],
                            cwd=ROOT, env=environment, check=True)
         if manifest['target'].endswith('-unknown-linux-gnu'):

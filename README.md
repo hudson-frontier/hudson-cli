@@ -1,7 +1,7 @@
 <h1 align="center">Hudson CLI</h1>
 
 <p align="center">
-  Operate Hudson agents and Hudsonbox sandboxes from your terminal.
+  Work with a local agent, Hudson services and Hudsonbox sandboxes from your terminal.
 </p>
 
 <p align="center">
@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="#installation">Installation</a> ·
+  <a href="#local-terminal-agent">Local agent</a> ·
   <a href="#work-with-agents">Agents</a> ·
   <a href="#manage-sandboxes">Sandboxes</a> ·
   <a href="#reference">Documentation</a>
@@ -19,9 +20,14 @@
 
 ---
 
-Hudson CLI connects to existing Hudson services. Submit agent tasks, follow runs,
-manage sandboxes and transfer files through one executable. Your service operator
-provides the endpoints, credentials and workload configuration.
+Hudson CLI is the public operator interface for Hudson products. Work in a local
+project, submit tasks to configured agents, follow runs, manage sandboxes and
+transfer files through one executable. Service operators provide API endpoints,
+credentials and workload configuration.
+
+The published v0.1.1 release provides the API and sandbox commands. Local terminal
+execution and scheduler inspection are unreleased source features. The guides
+describe current source behavior; build `main` to try these additions.
 
 ## Installation
 
@@ -71,6 +77,33 @@ Check your installation:
 hudson --version
 hudson --help
 ```
+
+## Local terminal agent
+
+Development builds open a local agent when you run `hudson` without a command:
+
+```sh
+hudson --workspace /path/to/project
+hudson local --permission read-only
+```
+
+The local host uses Anthropic Messages and reads `ANTHROPIC_API_KEY` from the
+environment. The default policy asks before edits or shell commands. It records
+session state for explicit recovery and keeps the workspace's files in place.
+Linux and macOS are supported; use WSL on Windows. Workspace search requires
+ripgrep (`rg`), which Homebrew installs automatically.
+
+Build current source without replacing a stable installation:
+
+```sh
+git clone --branch main https://github.com/hudson-frontier/hudson-cli.git
+cd hudson-cli
+cargo build --locked --bin hudson
+./target/debug/hudson local --workspace /path/to/project
+```
+
+See the [local agent guide](docs/local-agent.md) for
+permissions, model selection, conversation recovery and execution limits.
 
 ## Work with agents
 
@@ -162,6 +195,7 @@ hudson sandbox create --help
 | --- | --- |
 | [Command reference](docs/reference.md) | Commands, flags and defaults |
 | [Agent workflows](docs/agent.md) | Tasks, sessions, events and approvals |
+| [Local terminal agent](docs/local-agent.md) | Workspace tools, approvals and durable conversations |
 | [Sandbox workflows](docs/sandbox.md) | Profiles, operations, output and file transfers |
 | [Automation](docs/automation.md) | JSON, completion and exit codes |
 | [Troubleshooting](docs/troubleshooting.md) | Setup, authentication, transport and recovery |
@@ -175,7 +209,7 @@ structures. See [architecture and compatibility](docs/architecture.md).
 Clone the repository and use its pinned Rust 1.92.0 toolchain:
 
 ```sh
-git clone https://github.com/hudson-frontier/hudson-cli.git
+git clone --branch main https://github.com/hudson-frontier/hudson-cli.git
 cd hudson-cli
 
 cargo fmt --all -- --check
@@ -188,6 +222,7 @@ cargo test --all-targets --locked
 | --- | --- |
 | [src/lib.rs](src/lib.rs) | Command parsing and dispatch |
 | [src/agent](src/agent) | Agent transport and terminal workflows |
+| [src/local](src/local) | Local terminal host and workspace tools |
 | [src/sandbox.rs](src/sandbox.rs) | Sandbox SDK adapter |
 | [scripts](scripts) | Native packaging and release validation |
 | [docs](docs) | Task guides and generated command reference |
