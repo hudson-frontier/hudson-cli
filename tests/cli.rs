@@ -432,6 +432,7 @@ async fn agent_json_files_reject_fifos_without_waiting_for_a_writer() {
 async fn help_and_versions_are_offline_for_all_entrypoints() {
     for (binary, args) in [
         (HUDSON, vec!["--help"]),
+        (HUDSON, vec!["local", "--help"]),
         (HUDSON, vec!["agent", "--help"]),
         (HUDSON, vec!["sandbox", "--help"]),
         (HUDSON, vec!["start", "--help"]),
@@ -459,12 +460,54 @@ async fn shell_completion_discovers_products_and_options_offline() {
     for shell in ["bash", "zsh", "fish", "powershell", "elvish"] {
         let output = cli(HUDSON, &["completion", shell], 0).await;
         let script = String::from_utf8(output.stdout).unwrap();
-        for item in ["hudson", "agent", "sandbox", "key-file", "agent-version"] {
+        for item in [
+            "hudson",
+            "local",
+            "workspace",
+            "permission",
+            "agent",
+            "sandbox",
+            "key-file",
+            "agent-version",
+        ] {
             assert!(script.contains(item), "missing {item} for {shell}");
         }
         assert!(output.stderr.is_empty());
     }
     cli(HUDSON, &["completion", "unsupported-shell"], 2).await;
+}
+
+#[tokio::test]
+async fn local_entrypoints_fail_clearly_without_a_terminal_and_reject_api_option_mixing() {
+    for args in [
+        vec![],
+        vec!["local"],
+        vec!["--permission", "read-only"],
+        vec!["local", "--permission", "ask"],
+    ] {
+        let output = cli(HUDSON, &args, 1).await;
+        assert!(output.stdout.is_empty());
+        let error = String::from_utf8(output.stderr).unwrap();
+        #[cfg(unix)]
+        assert!(error.contains("requires a terminal"));
+        #[cfg(windows)]
+        assert!(error.contains("WSL"));
+    }
+    for args in [
+        vec!["--workspace", ".", "agent", "health"],
+        vec!["--permission", "ask", "sandbox", "list"],
+        vec!["local", "--url", "http://127.0.0.1:1"],
+        vec!["--model", "fixture", "health"],
+    ] {
+        let output = cli(HUDSON, &args, 2).await;
+        assert!(output.stdout.is_empty());
+    }
+    for (binary, args) in [(HUDSON, vec!["agent"]), (AGENT, vec![])] {
+        let output = cli(binary, &args, 1).await;
+        assert!(String::from_utf8(output.stderr)
+            .unwrap()
+            .contains("interactive session requires a terminal"));
+    }
 }
 
 #[tokio::test]

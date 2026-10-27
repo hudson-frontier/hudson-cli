@@ -44,7 +44,8 @@ hudson agent events RUN_UUID --after 42
 hudson agent follow RUN_UUID --after 42
 ```
 
-For a host using an external scheduler, inspect publication separately:
+Current source builds can inspect publication for a host using an external
+scheduler. This command is not included in the published v0.1.1 client:
 
 ```console
 hudson agent schedule RUN_UUID

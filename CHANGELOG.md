@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add the local terminal agent to `hudson`, with workspace tools, approvals,
+  durable conversations and explicit recovery through `hudson local`.
+- Preserve saved version 1 tool definitions and completed operation receipts
+  while hardening local file access, session state and process cleanup.
+- Add `hudson agent schedule` for scheduler publication inspection.
+- Validate all agent base URLs and keep loopback HTTP requests direct with or
+  without bearer authentication.
+
 ## 0.1.1
 
 - Prepare Homebrew source formulae and native bottles for the Hudson tap.

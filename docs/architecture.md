@@ -1,19 +1,22 @@
 # Architecture and ownership
 
-This repository is the executable product maintained by the CLI team. Its initial
-adapters expose two equal product namespaces:
+This repository owns the public operator executable and terminal experience.
+The CLI team maintains the local host and these product interfaces:
 
 | Namespace | Adapter | Contract owner |
 | --- | --- | --- |
+| `hudson`, `hudson local` | `src/local` | CLI team; Hudson Core runtime and harness |
 | `hudson agent` | `src/agent` | Hudson agent API team |
 | `hudson sandbox` | `src/sandbox.rs` | Hudsonbox API and SDK team |
 
-`src/lib.rs` only parses and dispatches. Agent requests use the existing public
+`src/lib.rs` parses and dispatches. Agent requests use the public
 HTTP contract. Sandbox requests use `sandbox-client`, pinned to an immutable Git
 revision in Cargo.toml and Cargo.lock. Generated SDK models remain upstream.
-No backend databases, schedulers, policy evaluation or VM lifecycle code belongs
-in this repository. Agent blocking HTTP work runs outside the sandbox async
-runtime.
+The local host uses immutable Hudson Core and harness revisions for execution,
+authorization, verification and durable runtime records. Its UI, workspace tools
+and session metadata stay here. Hosted databases, schedulers and VM lifecycle
+code stay in their product repositories. Blocking API work and the local TUI run
+outside the sandbox async runtime.
 
 The initial agent adapter comes from Hudson revision
 `44e81c64a43cadf61cefe42b077e7eb6997c7875`; the sandbox adapter comes from Hudsonbox
@@ -26,6 +29,11 @@ separately to operate those services.
 
 ## Compatibility
 
+`hudson` without arguments opens the local terminal agent on Unix. `hudson local`
+selects it explicitly; root local options select its workspace, model and policy.
+Windows reports WSL guidance for local execution while retaining native API help,
+completion and existing commands. Local options cannot select API operations.
+
 `hudson` offers product namespaces and accepts valid legacy flat agent commands.
 The dispatcher preserves valid legacy commands before trying the product parser,
 before making any request. This retains the historical `hudson agent NAME
@@ -33,6 +41,10 @@ VERSION` lookup even for names such as `get`. `hudson-cli` always uses the legac
 `hudsonbox` always uses the legacy sandbox parser. Help and version requests
 remain offline. Installing only `--bin hudson` avoids replacing the optional
 compatibility executables.
+
+`hudson agent` and `hudson-cli` without an operation keep their interactive API
+session behavior. Legacy root connection flags also select the API session.
+Local session credentials and remote service profiles remain separate.
 
 Authentication, request keys and output contracts remain product-specific.
 Shared configuration must not make a credential for one service available to

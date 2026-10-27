@@ -21,7 +21,7 @@ def main():
                 raise ValueError(f'Broken guide link in {path.relative_to(package.ROOT)}: {link}')
     if f'## {package.version()}' not in (package.ROOT/'CHANGELOG.md').read_text():
         raise ValueError('Changelog does not describe the current release version')
-    for name in package.REQUIRED_DOCS:
+    for name in package.CURRENT_DOCS:
         if not (package.ROOT/'docs'/name).is_file():
             raise ValueError('Missing release guide: '+name)
     print(f'Guide links and release version passed: {len(files)} Markdown files')
