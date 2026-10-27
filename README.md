@@ -27,8 +27,7 @@ provides the endpoints, credentials and workload configuration.
 
 ### Homebrew
 
-Homebrew packaging is prepared for macOS Apple silicon and Linux x86_64. The tap
-is awaiting publication. Once the CLI release and tap formula are published:
+Install Hudson CLI on macOS Apple silicon or Linux x86_64:
 
 ```sh
 brew install hudson-frontier/tap/hudson
@@ -57,13 +56,13 @@ for verification, platform limits, PATH setup, upgrades and removal.
 
 ### Cargo
 
-Build and install the current `main` branch with Rust 1.92.0 or newer:
+Build and install the published release with Rust 1.92.0 or newer:
 
 ```sh
-cargo install --git https://github.com/hudson-frontier/hudson-cli --locked --bin hudson
+cargo install --git https://github.com/hudson-frontier/hudson-cli --tag v0.1.1 --locked --bin hudson
 ```
 
-To select a release tag or install compatibility executables, see
+To select another release tag or install compatibility executables, see
 [source installation](docs/install.md#source-installation).
 
 Check your installation:

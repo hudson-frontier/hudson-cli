@@ -5,8 +5,7 @@ database or virtual machine. Obtain the service URL and credentials separately.
 
 ## Homebrew
 
-After the CLI release and its tap formula are published, install the primary
-executable and shell completion with:
+Install the primary executable and shell completion with:
 
 ```sh
 brew install hudson-frontier/tap/hudson

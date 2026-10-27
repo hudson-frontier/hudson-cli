@@ -5,7 +5,7 @@ completion. It includes the CLI guides and licensing. The optional `hudson-cli`
 and `hudsonbox` compatibility executables remain available in native archives and
 through Cargo source installation.
 
-For a published tap release:
+Install the published release:
 
 ```sh
 brew install hudson-frontier/tap/hudson
@@ -39,8 +39,9 @@ or Cargo for Intel Macs, Windows and Linux aarch64. Homebrew no longer builds ne
 Intel dependency bottles, so Hudson's tap does not promise an Intel source build
 or bottle. See [Homebrew's support tiers](https://docs.brew.sh/Support-Tiers).
 
-The tap becomes available after an authorized CLI release and its Homebrew
-publication. CI artifacts and a merged packaging change do not publish a release.
+Published bottles and the formula are available in the
+[Hudson Homebrew tap](https://github.com/hudson-frontier/homebrew-tap).
+CI artifacts and merged packaging changes require separate release publication.
 
 ## Prepare a release
 
