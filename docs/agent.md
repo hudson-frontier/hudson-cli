@@ -20,10 +20,12 @@ or secret manager. The argument names an environment variable, not its value:
 hudson agent --url https://agent.example.com --api-token-env HUDSON_API_TOKEN health
 ```
 
-Use trusted HTTPS or loopback HTTP. Authenticated URLs cannot contain user
-information, query strings or fragments. Connection options precede the operation.
+Use trusted HTTPS or loopback HTTP. API URLs cannot contain user information,
+query strings or fragments. An optional path prefix is retained when selecting
+API routes. Connection options precede the operation.
 Agent and sandbox credentials remain independent.
-Authenticated loopback HTTP connects directly and ignores proxy environment variables.
+Loopback HTTP connects directly and ignores proxy environment variables, with or
+without a bearer token. Bearer authentication requires HTTPS or loopback HTTP.
 
 ## Submit and follow
 
