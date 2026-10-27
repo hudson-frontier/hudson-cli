@@ -442,12 +442,12 @@ fn metadata_reads_reject_public_files_hard_links_and_fifos_without_blocking() {
     fs::hard_link(&path, state.0.join("linked-metadata")).unwrap();
     assert!(read_session(&host.directory).is_err());
     fs::remove_file(&path).unwrap();
-    rustix::fs::mkfifoat(
-        rustix::fs::CWD,
-        &path,
-        rustix::fs::Mode::from_raw_mode(0o600),
-    )
-    .unwrap();
+    assert!(std::process::Command::new("mkfifo")
+        .args(["-m", "600"])
+        .arg(&path)
+        .status()
+        .unwrap()
+        .success());
     let started = std::time::Instant::now();
     assert!(read_session(&host.directory).is_err());
     assert!(started.elapsed() < std::time::Duration::from_secs(1));

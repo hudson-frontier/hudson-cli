@@ -95,18 +95,15 @@ fn bounded_regular_utf8_files_and_directory_listing() {
     fs::create_dir(root.path().join("directory")).unwrap();
     let _socket = std::os::unix::net::UnixListener::bind(root.path().join("socket")).unwrap();
     let tools = tools(root.path());
-    #[cfg(target_os = "linux")]
-    {
-        rustix::fs::mkfifoat(
-            &tools.root_directory,
-            "fifo",
-            rustix::fs::Mode::from_raw_mode(0o600),
-        )
-        .unwrap();
-        assert!(tools
-            .execute_tool("read_file", &json!({"path":"fifo"}))
-            .is_err());
-    }
+    assert!(std::process::Command::new("mkfifo")
+        .args(["-m", "600"])
+        .arg(root.path().join("fifo"))
+        .status()
+        .unwrap()
+        .success());
+    assert!(tools
+        .execute_tool("read_file", &json!({"path":"fifo"}))
+        .is_err());
     for name in ["binary", "large", "directory", "socket"] {
         assert!(tools
             .execute_tool("read_file", &json!({"path":name}))
