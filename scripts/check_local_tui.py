@@ -173,7 +173,7 @@ try:
         workspace = root / 'project'
         workspace.mkdir()
         (workspace / 'calculation.py').write_text('value = 1\nassert value == 2\n')
-        state = root / 'state'
+        state = root / 'state' / 'nested' / 'hudson'
         session_id = run_terminal(workspace, state)
         assert (workspace / 'calculation.py').read_text() == 'value = 2\nassert value == 2\n'
         assert run_terminal(workspace, state, session_id) == session_id

@@ -106,8 +106,10 @@ Keep the state root in a location you control, outside untrusted workspaces,
 and select the same `HUDSON_STATE_DIR` when reopening a custom state location.
 New directories are private and files use mode 0600. Existing state must be
 user-owned and private; unsafe files, links and public directories are rejected
-without changing their permissions. Session metadata pins the
-workspace and configuration. A file-backed core store holds runs, checkpoints,
+without changing their permissions. New state and session directories are synced
+with their parent entries before use. A directory sync failure stops startup;
+an empty private directory can remain from the failed attempt. Session metadata
+pins the workspace and configuration. A file-backed core store holds runs, checkpoints,
 operations and results. It locks the session for the lifetime of one host and
 syncs atomic snapshot commits, including operation intent before dispatch. A
 second host cannot concurrently open that session. Writes stage random private
