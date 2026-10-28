@@ -77,6 +77,12 @@ struct Host {
     poisoned: bool,
 }
 
+#[cfg(test)]
+thread_local! {
+    static SESSION_READ_OBSERVER: std::cell::RefCell<Option<Box<dyn FnMut()>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 fn read_session(directory: &SessionDirectory) -> Result<Session, Error> {
     let bytes = directory.read("session.json", 1024 * 1024)?;
     let session: Session = serde_json::from_slice(&bytes)?;
@@ -90,7 +96,32 @@ fn read_session(directory: &SessionDirectory) -> Result<Session, Error> {
     {
         return Err("invalid saved session metadata".into());
     }
+    #[cfg(test)]
+    SESSION_READ_OBSERVER.with(|observer| {
+        if let Some(observer) = observer.borrow_mut().as_mut() {
+            observer();
+        }
+    });
     Ok(session)
+}
+
+fn open_session_state(
+    directory: &SessionDirectory,
+    resume: bool,
+) -> Result<(Store, Option<Session>), Error> {
+    if resume {
+        // Resume must never create a fresh snapshot for existing metadata.
+        directory.require_file("state.json")?;
+    }
+    // Metadata and runtime records describe the same session. Hold its lifetime
+    // lock before reading either, so a prior host cannot advance between reads.
+    let store = Store::local_file_in(directory.file(), "state.json")?;
+    let session = if resume {
+        Some(read_session(directory)?)
+    } else {
+        None
+    };
+    Ok((store, session))
 }
 
 fn save_session(directory: &SessionDirectory, session: &Session) -> Result<(), Error> {
@@ -136,9 +167,8 @@ impl Host {
         let state_root = SessionDirectory::open(&state_root)?;
         let id = args.resume.unwrap_or_else(Uuid::new_v4);
         let directory = state_root.child(&id.to_string(), args.resume.is_none())?;
-        let session: Session = if args.resume.is_some() {
-            let saved = read_session(&directory)?;
-            directory.require_file("state.json")?;
+        let (store, saved) = open_session_state(&directory, args.resume.is_some())?;
+        let session: Session = if let Some(saved) = saved {
             if saved.schema_version != 1 || saved.id != id || saved.workspace != root {
                 return Err("saved session belongs to another workspace or schema".into());
             }
@@ -167,7 +197,6 @@ impl Host {
                 turns: Vec::new(),
             }
         };
-        let store = Store::local_file_in(directory.file(), "state.json")?;
         if session.model.trim().is_empty() || session.model.len() > 200 {
             return Err("model name must contain 1..200 bytes".into());
         }
