@@ -163,8 +163,7 @@ impl Host {
                 std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state/hudson"))
             })
             .ok_or("set HOME or HUDSON_STATE_DIR")?;
-        private_directory(&state_root)?;
-        let state_root = SessionDirectory::open(&state_root)?;
+        let state_root = private_directory(&state_root)?;
         let id = args.resume.unwrap_or_else(Uuid::new_v4);
         let directory = state_root.child(&id.to_string(), args.resume.is_none())?;
         let (store, saved) = open_session_state(&directory, args.resume.is_some())?;

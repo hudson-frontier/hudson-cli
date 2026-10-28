@@ -4,7 +4,7 @@ use rustix::fs::{AtFlags, Mode, OFlags};
 use std::{
     fs::{self, File, OpenOptions},
     io::{Read, Write},
-    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     path::{Component, Path, PathBuf},
 };
 
@@ -25,13 +25,99 @@ fn directory_path(path: &Path) -> PathBuf {
     path.components().collect()
 }
 
-pub(super) fn private_directory(path: &Path) -> Result<(), Error> {
+pub(super) fn private_directory(path: &Path) -> Result<Directory, Error> {
     let path = directory_path(path);
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(&path)?;
-    private_directory_metadata(&fs::symlink_metadata(&path)?)
+    Directory::from_file(durable_directory(&path, true, 0)?)
+}
+
+fn sync_directory_link(directory: &File) -> Result<(), Error> {
+    directory.sync_all()?;
+    // Resolve the actual parent from the pinned directory, including after a
+    // rename. Syncing the child alone does not persist its entry in the parent.
+    let parent = File::from(rustix::fs::openat(
+        directory,
+        "..",
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?);
+    parent.sync_all()?;
+    Ok(())
+}
+
+fn create_directory_in(
+    parent: &File,
+    name: &std::ffi::OsStr,
+    existing: bool,
+) -> Result<File, Error> {
+    match rustix::fs::mkdirat(parent, name, Mode::from_raw_mode(0o700)) {
+        Ok(()) => (),
+        Err(rustix::io::Errno::EXIST) if existing => (),
+        Err(error) => return Err(error.into()),
+    }
+    let child = File::from(rustix::fs::openat(
+        parent,
+        name,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )?);
+    private_directory_metadata(&child.metadata()?)?;
+    child.sync_all()?;
+    parent.sync_all()?;
+    Ok(child)
+}
+
+fn durable_directory(path: &Path, private: bool, depth: usize) -> Result<File, Error> {
+    if depth > 128 {
+        return Err("local state path requires too many new directories".into());
+    }
+    // Existing ancestor aliases (for example macOS /var) remain supported.
+    // The selected root and every newly created component are no-follow.
+    let opened = if private {
+        Directory::open(path).map(|directory| directory.0)
+    } else {
+        OpenOptions::new()
+            .read(true)
+            .custom_flags((OFlags::DIRECTORY | OFlags::NONBLOCK).bits() as i32)
+            .open(path)
+            .map_err(Error::from)
+    };
+    match opened {
+        Ok(directory) => {
+            // Also cover retry after a previous creation's parent sync failed:
+            // existence does not establish that this link was made durable.
+            sync_directory_link(&directory)?;
+            Ok(directory)
+        }
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            let parent_path = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or(Path::new("."));
+            let parent = durable_directory(parent_path, false, depth + 1)?;
+            match path.components().next_back() {
+                Some(Component::Normal(name)) => create_directory_in(&parent, name, true),
+                Some(Component::ParentDir) => {
+                    let directory = File::from(rustix::fs::openat(
+                        &parent,
+                        "..",
+                        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                        Mode::empty(),
+                    )?);
+                    if private {
+                        private_directory_metadata(&directory.metadata()?)?;
+                    }
+                    sync_directory_link(&directory)?;
+                    Ok(directory)
+                }
+                _ => Err("local state path requires a directory name".into()),
+            }
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn private_file_metadata(metadata: &fs::Metadata) -> Result<(), Error> {
@@ -82,7 +168,7 @@ impl Directory {
     pub fn child(&self, name: &str, create: bool) -> Result<Self, Error> {
         filename(name)?;
         if create {
-            rustix::fs::mkdirat(&self.0, name, Mode::from_raw_mode(0o700))?;
+            return Self::from_file(create_directory_in(&self.0, name.as_ref(), false)?);
         }
         let file = rustix::fs::openat(
             &self.0,
@@ -171,6 +257,101 @@ impl Drop for Staged<'_> {
 mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    fn temporary() -> tempfile::TempDir {
+        let directory = tempfile::tempdir().unwrap();
+        fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        directory
+    }
+
+    #[test]
+    fn nested_state_creation_returns_the_pinned_private_directory() {
+        let temporary = temporary();
+        let root = temporary.path().join(".local/state/hudson");
+        let directory = private_directory(&root).unwrap();
+        for relative in [".local", ".local/state", ".local/state/hudson"] {
+            assert_eq!(
+                fs::metadata(temporary.path().join(relative))
+                    .unwrap()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+        }
+        let outside = temporary.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::rename(
+            temporary.path().join(".local"),
+            temporary.path().join("moved"),
+        )
+        .unwrap();
+        symlink(&outside, temporary.path().join(".local")).unwrap();
+        let session = directory.child("session", true).unwrap();
+        session.replace("session.json", b"private session").unwrap();
+        assert_eq!(
+            fs::read(
+                temporary
+                    .path()
+                    .join("moved/state/hudson/session/session.json")
+            )
+            .unwrap(),
+            b"private session"
+        );
+        assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn ancestor_aliases_and_parent_components_keep_their_path_semantics() {
+        let temporary = temporary();
+        let real = temporary.path().join("real");
+        private_directory(&real).unwrap();
+        let alias = temporary.path().join("alias");
+        symlink(&real, &alias).unwrap();
+        let root = alias.join("made/../state/hudson");
+        let directory = private_directory(&root).unwrap();
+        directory.child("session", true).unwrap();
+        assert!(real.join("made").is_dir());
+        assert!(real.join("state/hudson/session").is_dir());
+        assert!(private_directory(&alias).is_err());
+        let reopened = private_directory(&root).unwrap();
+        assert!(reopened.child("session", false).is_ok());
+        assert!(reopened.child("session", true).is_err());
+    }
+
+    #[test]
+    fn excessive_missing_ancestors_fail_before_creating_any_directory() {
+        let temporary = temporary();
+        let mut root = temporary.path().to_path_buf();
+        for _ in 0..130 {
+            root.push("new");
+        }
+        assert!(private_directory(&root).is_err());
+        assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn session_creation_fails_when_its_parent_cannot_be_synced() {
+        let temporary = temporary();
+        let descriptor = rustix::fs::open(
+            temporary.path(),
+            OFlags::PATH | OFlags::DIRECTORY | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap();
+        let parent = Directory::from_file(descriptor.into()).unwrap();
+        // O_PATH permits mkdirat/openat, but cannot acknowledge fsync. A new
+        // session must not be usable after that durability gate fails.
+        assert!(parent.child("session", true).is_err());
+        assert!(temporary.path().join("session").is_dir());
+        assert!(!temporary.path().join("session/session.json").exists());
+        // A retry for root creation must acknowledge the same parent sync even
+        // though its first attempt already left the directory entry present.
+        assert!(create_directory_in(parent.file(), "state".as_ref(), true).is_err());
+        assert!(create_directory_in(parent.file(), "state".as_ref(), true).is_err());
+        let recovered = private_directory(&temporary.path().join("state")).unwrap();
+        assert!(recovered.child("session", true).is_ok());
+    }
 
     #[test]
     fn final_state_aliases_are_rejected_with_trailing_separators_or_dot() {
