@@ -106,6 +106,21 @@ fn wrapped_lines(text: &str, width: usize) -> Vec<String> {
     }
     rows
 }
+#[derive(Default)]
+struct ConversationScroll(usize);
+impl ConversationScroll {
+    fn page_up(&mut self) {
+        self.0 = self.0.saturating_add(10);
+    }
+    fn page_down(&mut self) {
+        self.0 = self.0.saturating_sub(10);
+    }
+    fn visible_rows<'a>(&mut self, rows: &'a [String], height: usize) -> &'a [String] {
+        self.0 = self.0.min(rows.len().saturating_sub(height));
+        let end = rows.len() - self.0;
+        &rows[end.saturating_sub(height)..end]
+    }
+}
 fn append_paste(input: &mut String, text: &str) -> bool {
     if text.len() > (32 * 1024_usize).saturating_sub(input.len()) {
         return false;
@@ -213,7 +228,7 @@ pub(super) fn run(
     let worker = std::thread::spawn(move || host.work(commands));
     let mut input = String::new();
     let mut status = "Ready".to_owned();
-    let mut scroll = 0usize;
+    let mut scroll = ConversationScroll::default();
     let mut busy = false;
     let mut quitting = false;
     let mut streamed = String::new();
@@ -321,10 +336,8 @@ pub(super) fn run(
                         wrapped_key = Some((log.revision, width));
                     }
                     let height = layout[1].height.saturating_sub(2) as usize;
-                    let end = wrapped.len().saturating_sub(scroll);
-                    let start = end.saturating_sub(height);
                     frame.render_widget(
-                        Paragraph::new(wrapped[start..end].join("\n"))
+                        Paragraph::new(scroll.visible_rows(&wrapped, height).join("\n"))
                             .block(Block::default().borders(Borders::ALL).title("Conversation")),
                         layout[1],
                     );
@@ -364,10 +377,8 @@ pub(super) fn run(
                         status = "Cancelling; model IO may wait for its bounded transport timeout"
                             .into();
                     }
-                    KeyCode::PageUp => {
-                        scroll = scroll.saturating_add(10).min(log.text.lines().count())
-                    }
-                    KeyCode::PageDown => scroll = scroll.saturating_sub(10),
+                    KeyCode::PageUp => scroll.page_up(),
+                    KeyCode::PageDown => scroll.page_down(),
                     KeyCode::Backspace if !quitting => {
                         input.pop();
                     }
@@ -384,7 +395,7 @@ pub(super) fn run(
                         if text.is_empty() {
                             continue;
                         }
-                        scroll = 0;
+                        scroll = ConversationScroll::default();
                         push(&mut log, &format!("\nYou: {text}\n"));
                         if text == "/quit" {
                             shutdown.store(true, Ordering::Release);
@@ -448,6 +459,32 @@ pub(super) fn run(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scrolling_reaches_soft_wrapped_history_and_clamps_after_resize_or_trim() {
+        let text: String = (0..40).map(|index| format!("{index:04}")).collect();
+        let rows = super::wrapped_lines(&text, 4);
+        assert_eq!(text.lines().count(), 1);
+        let mut scroll = super::ConversationScroll::default();
+        scroll.page_up();
+        assert_eq!(
+            scroll.visible_rows(&rows, 5),
+            ["0025", "0026", "0027", "0028", "0029"]
+        );
+        scroll.page_down();
+        assert_eq!(scroll.visible_rows(&rows, 5), &rows[35..]);
+        for _ in 0..10 {
+            scroll.page_up();
+        }
+        assert_eq!(
+            scroll.visible_rows(&rows, 5),
+            ["0000", "0001", "0002", "0003", "0004"]
+        );
+        assert_eq!(scroll.visible_rows(&rows, 50), rows);
+        scroll.page_up();
+        assert_eq!(scroll.visible_rows(&rows[..2], 5), &rows[..2]);
+        assert_eq!(scroll.visible_rows(&[], 5), &[] as &[String]);
+    }
+
     #[test]
     fn terminal_content_cannot_inject_controls() {
         let value = super::safe("hello\n\x1b]52;c;secret\x07\u{202e}abc");

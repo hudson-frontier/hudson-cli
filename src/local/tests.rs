@@ -84,6 +84,131 @@ fn host(
     )
     .unwrap()
 }
+
+#[test]
+fn resume_locks_before_reading_metadata_and_cannot_overwrite_a_newer_turn() {
+    use std::time::Duration;
+    const TIMEOUT: Duration = Duration::from_secs(20);
+    enum Attempt {
+        MetadataRead,
+        Finished(Result<usize, String>),
+    }
+    let root = Directory::new();
+    let state = Directory::new();
+    let mut first = host(
+        &root.0,
+        &state.0,
+        Permission::ReadOnly,
+        vec![
+            ModelResponse::Final {
+                output: json!("first answer"),
+            },
+            ModelResponse::Final {
+                output: json!("second answer"),
+            },
+        ],
+    );
+    first.prompt("First task".into()).unwrap();
+    first.drive(&mpsc::channel().1).unwrap();
+    let first_id = first.active().unwrap();
+    let (observed, observations) = mpsc::sync_channel(1);
+    let (release, released) = mpsc::sync_channel(1);
+    let state_path = state.0.clone();
+    let second = std::thread::spawn(move || {
+        let read = observed.clone();
+        SESSION_READ_OBSERVER.with(|observer| {
+            observer.replace(Some(Box::new(move || {
+                read.send(Attempt::MetadataRead).unwrap();
+                released.recv_timeout(TIMEOUT).unwrap();
+            })));
+        });
+        let directory = SessionDirectory::open(&state_path).unwrap();
+        let opened = open_session_state(&directory, true);
+        SESSION_READ_OBSERVER.with(|observer| observer.take());
+        let result = opened
+            .and_then(|(store, saved)| {
+                build_host(
+                    saved.expect("resume metadata"),
+                    directory,
+                    store,
+                    Box::new(Script {
+                        responses: VecDeque::new(),
+                        follow_up: false,
+                    }),
+                )
+                .map(|host| host.session.turns.len())
+            })
+            .map_err(|error| error.to_string());
+        observed.send(Attempt::Finished(result)).unwrap();
+    });
+    let observed = observations.recv_timeout(TIMEOUT).unwrap();
+    let read_before_lock = matches!(&observed, Attempt::MetadataRead);
+    first.prompt("Second task".into()).unwrap();
+    first.drive(&mpsc::channel().1).unwrap();
+    let expected = [first_id, first.active().unwrap()];
+    assert_eq!(read_session(&first.directory).unwrap().turns.len(), 2);
+    drop(first);
+    let result = match observed {
+        Attempt::MetadataRead => {
+            // The legacy ordering paused here with turn 1 already loaded.
+            // Let it acquire the now-released lock and exercise Host::build.
+            release.send(()).unwrap();
+            match observations.recv_timeout(TIMEOUT).unwrap() {
+                Attempt::Finished(result) => result,
+                Attempt::MetadataRead => panic!("metadata read more than once"),
+            }
+        }
+        Attempt::Finished(result) => result,
+    };
+    second.join().unwrap();
+    let directory = SessionDirectory::open(&state.0).unwrap();
+    let recorded = read_session(&directory).unwrap();
+    assert!(
+        !read_before_lock && result.is_err(),
+        "a concurrent resume read stale metadata and retained only {} turns",
+        recorded.turns.len()
+    );
+    let (store, saved) = open_session_state(&directory, true).unwrap();
+    let reopened = build_host(
+        saved.unwrap(),
+        directory,
+        store,
+        Box::new(Script {
+            responses: VecDeque::new(),
+            follow_up: false,
+        }),
+    )
+    .unwrap();
+    assert_eq!(
+        reopened
+            .session
+            .turns
+            .iter()
+            .map(|turn| turn.run)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    for id in expected {
+        let view = reopened.runtime.store.inspect(&reopened.actor, id).unwrap();
+        assert_eq!(view.status, RunStatus::Completed);
+        assert_eq!(view.usage.model_calls, 1);
+    }
+}
+
+#[test]
+fn resume_without_a_core_snapshot_does_not_bootstrap_new_state() {
+    let root = Directory::new();
+    let state = Directory::new();
+    let first = host(&root.0, &state.0, Permission::ReadOnly, vec![]);
+    let metadata = fs::read(state.0.join("session.json")).unwrap();
+    drop(first);
+    fs::remove_file(state.0.join("state.json")).unwrap();
+    let directory = SessionDirectory::open(&state.0).unwrap();
+    assert!(open_session_state(&directory, true).is_err());
+    assert!(!state.0.join("state.json").exists());
+    assert_eq!(fs::read(state.0.join("session.json")).unwrap(), metadata);
+}
+
 #[test]
 fn local_tools_fix_a_fixture_and_follow_up_survives_reopen() {
     let root = Directory::new();
