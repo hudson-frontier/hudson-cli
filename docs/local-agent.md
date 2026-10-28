@@ -1,8 +1,8 @@
 # Local terminal agent
 
-`hudson` opens a terminal UI and a local agent in the current workspace. The
-agent can inspect files, propose edits, run approved commands and verify their
-results. Its runtime and durable operation records come from Hudson Core.
+`hudson` and `hudson-cli` open a terminal UI and a local agent in the current
+workspace. The agent can inspect files, propose edits, run approved commands and
+verify their results. Its runtime and durable operation records come from Hudson Core.
 
 The local agent is available in development builds; the published v0.1.1 release
 provides the agent API and sandbox commands. Use `hudson agent` to operate a
@@ -35,9 +35,10 @@ hudson --permission full-access
 hudson --workspace /path/to/project --resume SESSION_UUID
 ```
 
-`hudson-cli` keeps its HTTP-client behavior, including its default interactive
-API session. Explicit API commands such as `hudson agent health`, the legacy
-`hudson health`, and `hudson --url URL session` remain available. Local options
+Both executable names use the same local options and product commands. Use
+`hudson-cli session` or `hudson agent session` for an interactive API session.
+Explicit API commands such as `hudson agent health`, the legacy `hudson-cli health`,
+and `hudson --url URL session` remain available. Local options
 cannot be combined with API commands. Local execution requires a terminal on
 Linux or macOS. Use WSL for the local agent on Windows; native API commands,
 offline help and completion remain available.

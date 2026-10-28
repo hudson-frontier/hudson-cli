@@ -15,7 +15,7 @@ use std::{ffi::OsString, process::ExitCode};
     version,
     about = "Command-line interface for Hudson products",
     args_conflicts_with_subcommands = true,
-    after_help = "Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson-cli --help lists them."
+    after_help = "Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson agent --help lists them."
 )]
 struct Cli {
     #[command(flatten)]
@@ -155,7 +155,7 @@ fn local_execute(args: local_args::LocalArgs) -> ExitCode {
     }
 }
 
-/// Unified `hudson` executable, with the existing flat agent commands retained.
+/// Shared `hudson` and `hudson-cli` entrypoint, retaining valid flat agent commands.
 pub fn main_entry() -> ExitCode {
     let args: Vec<_> = std::env::args_os().collect();
     #[cfg(unix)]
@@ -179,7 +179,18 @@ pub fn main_entry() -> ExitCode {
         Invocation::Product(Cli {
             product: Some(Product::Completion { shell }),
             ..
-        }) => completion(shell),
+        }) => {
+            let program = if args
+                .first()
+                .and_then(|name| std::path::Path::new(name).file_stem())
+                .is_some_and(|name| name == "hudson-cli")
+            {
+                "hudson-cli"
+            } else {
+                "hudson"
+            };
+            completion(shell, program)
+        }
         Invocation::Product(Cli {
             product: Some(Product::Local(args)),
             ..
@@ -191,10 +202,10 @@ pub fn main_entry() -> ExitCode {
     }
 }
 
-fn completion(shell: clap_complete::Shell) -> ExitCode {
+fn completion(shell: clap_complete::Shell, program: &'static str) -> ExitCode {
     use clap::CommandFactory;
     use clap_complete::Generator;
-    let mut command = Cli::command().bin_name("hudson");
+    let mut command = Cli::command().bin_name(program);
     command.build();
     match shell.try_generate(&command, &mut std::io::stdout().lock()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -203,11 +214,6 @@ fn completion(shell: clap_complete::Shell) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// Compatibility entrypoint for existing `hudson-cli` scripts.
-pub fn legacy_agent_entry() -> ExitCode {
-    agent_execute(agent::commands::Args::parse())
 }
 
 /// Compatibility entrypoint for existing `hudsonbox` scripts.

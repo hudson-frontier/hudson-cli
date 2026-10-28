@@ -29,21 +29,22 @@ separately to operate those services.
 
 ## Compatibility
 
-`hudson` without arguments opens the local terminal agent on Unix. `hudson local`
-selects it explicitly; root local options select its workspace, model and policy.
+`hudson` and `hudson-cli` without arguments open the local terminal agent on Unix.
+`hudson local` selects it explicitly; root local options select its workspace,
+model and policy. Both executable names share the same parser and dispatcher.
 Windows reports WSL guidance for local execution while retaining native API help,
 completion and existing commands. Local options cannot select API operations.
 
 `hudson` offers product namespaces and accepts valid legacy flat agent commands.
 The dispatcher preserves valid legacy commands before trying the product parser,
 before making any request. This retains the historical `hudson agent NAME
-VERSION` lookup even for names such as `get`. `hudson-cli` always uses the legacy agent parser;
-`hudsonbox` always uses the legacy sandbox parser. Help and version requests
-remain offline. Installing only `--bin hudson` avoids replacing the optional
+VERSION` lookup even for names such as `get`. These legacy commands also work
+through `hudson-cli`; `hudsonbox` uses the legacy sandbox parser. Help and version
+requests remain offline. Installing only `--bin hudson` avoids replacing the optional
 compatibility executables.
 
-`hudson agent` and `hudson-cli` without an operation keep their interactive API
-session behavior. Legacy root connection flags also select the API session.
+`hudson agent` and `hudson-cli agent` without an operation select an interactive
+API session, as do the explicit `session` command and legacy root connection flags.
 Local session credentials and remote service profiles remain separate.
 
 Authentication, request keys and output contracts remain product-specific.

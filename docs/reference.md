@@ -28,7 +28,7 @@ Options:
   -h, --help                     Print help
   -V, --version                  Print version
 
-Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson-cli --help lists them.
+Without a command, Hudson opens the local terminal agent on Unix. Legacy API commands remain available at the root; hudson agent --help lists them.
 ```
 
 ## hudson local
