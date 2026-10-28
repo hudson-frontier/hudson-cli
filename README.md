@@ -80,10 +80,12 @@ hudson --help
 
 ## Local terminal agent
 
-Development builds open a local agent when you run `hudson` without a command:
+Development builds open the local TUI when you run `hudson` or `hudson-cli`
+without a command:
 
 ```sh
 hudson --workspace /path/to/project
+hudson-cli --workspace /path/to/project
 hudson local --permission read-only
 ```
 
@@ -200,9 +202,10 @@ hudson sandbox create --help
 | [Automation](docs/automation.md) | JSON, completion and exit codes |
 | [Troubleshooting](docs/troubleshooting.md) | Setup, authentication, transport and recovery |
 
-Legacy flat agent commands, including `hudson health`, remain available.
-The optional `hudson-cli` and `hudsonbox` binaries preserve their original command
-structures. See [architecture and compatibility](docs/architecture.md).
+`hudson-cli` uses the same commands and default TUI as `hudson`. Legacy flat agent
+commands, including `hudson-cli health`, remain available; use `hudson-cli session`
+for an interactive API session. The optional `hudsonbox` binary retains its
+standalone sandbox commands. See [architecture and compatibility](docs/architecture.md).
 
 ## Developing
 
